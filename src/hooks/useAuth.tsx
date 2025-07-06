@@ -1,25 +1,29 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { User, Session } from '@supabase/supabase-js';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 
-interface User {
-  id: string;
-  email: string;
-  fullName: string;
-  accountNumber: string;
-  role: 'user' | 'admin';
-  balance: number;
-  savingsBalance: number;
+interface AuthUser extends User {
+  fullName?: string;
+  accountNumber?: string;
+  role?: 'user' | 'admin';
+  country?: string;
+  conversionFeePending?: boolean;
+  conversionFeeAmount?: number;
+  conversionFeeCurrency?: string;
 }
 
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
+  session: Session | null;
   isAuthenticated: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   register: (userData: RegisterData) => Promise<boolean>;
-  verifyOTP: (email: string, otp: string) => Promise<boolean>;
+  verifyOTP: (email: string, token: string) => Promise<boolean>;
   logout: () => void;
-  updateBalance: (newBalance: number) => void;
+  updateProfile: (updates: any) => Promise<void>;
 }
 
 interface RegisterData {
@@ -29,65 +33,141 @@ interface RegisterData {
   phoneNumber: string;
   address: string;
   dateOfBirth: string;
-  ssn: string;
+  ssn?: string;
+  country: string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
 
   useEffect(() => {
+    // Set up auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        setSession(session);
+        if (session?.user) {
+          await loadUserProfile(session.user);
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
+      }
+    );
+
     // Check for existing session
-    const savedUser = localStorage.getItem('bankUser');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-    setLoading(false);
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) {
+        await loadUserProfile(session.user);
+      }
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const generateAccountNumber = (): string => {
-    return Math.floor(1000000000 + Math.random() * 9000000000).toString();
+  const loadUserProfile = async (authUser: User) => {
+    try {
+      // Get profile data
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+
+      // Check if user is admin
+      const { data: adminCheck } = await supabase
+        .from('admin_accounts')
+        .select('email')
+        .eq('email', authUser.email)
+        .single();
+
+      // Get account number
+      const { data: account } = await supabase
+        .from('accounts')
+        .select('account_number')
+        .eq('user_id', authUser.id)
+        .single();
+
+      const enhancedUser: AuthUser = {
+        ...authUser,
+        fullName: profile ? `${profile.first_name} ${profile.last_name}` : '',
+        accountNumber: account?.account_number,
+        role: adminCheck ? 'admin' : 'user',
+        country: profile?.country || 'US',
+        conversionFeePending: profile?.conversion_fee_pending || false,
+        conversionFeeAmount: profile?.conversion_fee_amount,
+        conversionFeeCurrency: profile?.conversion_fee_currency
+      };
+
+      setUser(enhancedUser);
+    } catch (error) {
+      console.error('Error loading profile:', error);
+      setUser(authUser as AuthUser);
+    }
   };
 
-  const generateOTP = (): string => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  };
-
-  const sendOTPEmail = async (email: string, otp: string): Promise<void> => {
-    // In a real implementation, this would send an actual email
-    // For demo purposes, we'll show the OTP in console and alert
-    console.log(`OTP for ${email}: ${otp}`);
-    alert(`Demo: Your OTP is ${otp} (In production, this would be sent to your email)`);
+  const validateSSN = (ssn: string, country: string): boolean => {
+    if (country === 'US') {
+      // US SSN validation: XXX-XX-XXXX format
+      const ssnRegex = /^\d{3}-\d{2}-\d{4}$/;
+      return ssnRegex.test(ssn);
+    }
+    return true; // Non-US customers don't need SSN validation
   };
 
   const register = async (userData: RegisterData): Promise<boolean> => {
     try {
-      // Check if user already exists
-      const users = JSON.parse(localStorage.getItem('bankUsers') || '[]');
-      const existingUser = users.find((u: any) => u.email === userData.email);
-      
-      if (existingUser) {
-        throw new Error('User already exists');
+      // Validate SSN for US customers
+      if (userData.country === 'US' && userData.ssn && !validateSSN(userData.ssn, userData.country)) {
+        toast({
+          title: "Invalid SSN",
+          description: "Please enter a valid US SSN in format XXX-XX-XXXX",
+          variant: "destructive",
+        });
+        return false;
       }
 
-      // Generate OTP and store temporarily
-      const otp = generateOTP();
-      const tempUserData = {
-        ...userData,
-        accountNumber: generateAccountNumber(),
-        role: userData.email === 'admin@usbank.com' ? 'admin' : 'user',
-        balance: userData.email === 'admin@usbank.com' ? 100000 : 1000, // Admin gets $100k, users get $1k starter
-        savingsBalance: 0,
-        otp,
-        otpExpiry: Date.now() + 10 * 60 * 1000, // 10 minutes
-        verified: false
-      };
-
-      localStorage.setItem('tempRegistration', JSON.stringify(tempUserData));
-      await sendOTPEmail(userData.email, otp);
+      const redirectUrl = `${window.location.origin}/auth`;
       
+      const { data, error } = await supabase.auth.signUp({
+        email: userData.email,
+        password: userData.password,
+        options: {
+          emailRedirectTo: redirectUrl,
+          data: {
+            first_name: userData.fullName.split(' ')[0],
+            last_name: userData.fullName.split(' ').slice(1).join(' '),
+            phone_number: userData.phoneNumber,
+            address: userData.address,
+            date_of_birth: userData.dateOfBirth,
+            ssn: userData.ssn,
+            country: userData.country
+          }
+        }
+      });
+
+      if (error) {
+        toast({
+          title: "Registration Failed",
+          description: error.message,
+          variant: "destructive",
+        });
+        return false;
+      }
+
+      if (data.user && !data.user.email_confirmed_at) {
+        toast({
+          title: "Check your email",
+          description: "We've sent you a confirmation link. Please check your email to verify your account.",
+        });
+      }
+
       return true;
     } catch (error) {
       console.error('Registration error:', error);
@@ -95,44 +175,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const verifyOTP = async (email: string, otp: string): Promise<boolean> => {
+  const verifyOTP = async (email: string, token: string): Promise<boolean> => {
     try {
-      const tempUserData = JSON.parse(localStorage.getItem('tempRegistration') || '{}');
-      
-      if (tempUserData.email !== email) {
-        throw new Error('Email mismatch');
+      const { error } = await supabase.auth.verifyOtp({
+        email,
+        token,
+        type: 'signup'
+      });
+
+      if (error) {
+        toast({
+          title: "Verification Failed",
+          description: error.message,
+          variant: "destructive",
+        });
+        return false;
       }
-
-      if (tempUserData.otp !== otp) {
-        throw new Error('Invalid OTP');
-      }
-
-      if (Date.now() > tempUserData.otpExpiry) {
-        throw new Error('OTP expired');
-      }
-
-      // Move from temp to permanent storage
-      const users = JSON.parse(localStorage.getItem('bankUsers') || '[]');
-      const newUser = {
-        id: Date.now().toString(),
-        email: tempUserData.email,
-        password: tempUserData.password,
-        fullName: tempUserData.fullName,
-        phoneNumber: tempUserData.phoneNumber,
-        address: tempUserData.address,
-        dateOfBirth: tempUserData.dateOfBirth,
-        ssn: tempUserData.ssn,
-        accountNumber: tempUserData.accountNumber,
-        role: tempUserData.role,
-        balance: tempUserData.balance,
-        savingsBalance: tempUserData.savingsBalance,
-        verified: true,
-        createdAt: new Date().toISOString()
-      };
-
-      users.push(newUser);
-      localStorage.setItem('bankUsers', JSON.stringify(users));
-      localStorage.removeItem('tempRegistration');
 
       return true;
     } catch (error) {
@@ -143,30 +201,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
-      const users = JSON.parse(localStorage.getItem('bankUsers') || '[]');
-      const user = users.find((u: any) => u.email === email && u.password === password);
-      
-      if (!user) {
-        throw new Error('Invalid credentials');
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) {
+        toast({
+          title: "Login Failed",
+          description: error.message,
+          variant: "destructive",
+        });
+        return false;
       }
 
-      if (!user.verified) {
-        throw new Error('Account not verified');
-      }
-
-      const userData: User = {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        accountNumber: user.accountNumber,
-        role: user.role,
-        balance: user.balance,
-        savingsBalance: user.savingsBalance
-      };
-
-      setUser(userData);
-      localStorage.setItem('bankUser', JSON.stringify(userData));
-      
       return true;
     } catch (error) {
       console.error('Login error:', error);
@@ -174,35 +222,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const updateBalance = (newBalance: number) => {
-    if (user) {
-      const updatedUser = { ...user, balance: newBalance };
-      setUser(updatedUser);
-      localStorage.setItem('bankUser', JSON.stringify(updatedUser));
-      
-      // Update in users array
-      const users = JSON.parse(localStorage.getItem('bankUsers') || '[]');
-      const updatedUsers = users.map((u: any) => 
-        u.id === user.id ? { ...u, balance: newBalance } : u
-      );
-      localStorage.setItem('bankUsers', JSON.stringify(updatedUsers));
+  const updateProfile = async (updates: any) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      // Reload user profile
+      await loadUserProfile(user);
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      throw error;
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('bankUser');
+  const logout = async () => {
+    await supabase.auth.signOut();
   };
 
   const value = {
     user,
-    isAuthenticated: !!user,
+    session,
+    isAuthenticated: !!session,
     loading,
     login,
     register,
     verifyOTP,
     logout,
-    updateBalance
+    updateProfile
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

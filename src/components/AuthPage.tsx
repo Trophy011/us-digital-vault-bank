@@ -2,31 +2,25 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-import { Building2, Eye, EyeOff } from 'lucide-react';
+import { Building2, Mail, Lock, User, Phone, MapPin, Calendar, CreditCard, Globe } from 'lucide-react';
 
 const AuthPage = () => {
-  const navigate = useNavigate();
-  const { login, register, verifyOTP } = useAuth();
+  const { login, register } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   
-  const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [showOTPVerification, setShowOTPVerification] = useState(false);
-  const [registrationEmail, setRegistrationEmail] = useState('');
-
-  // Login form state
   const [loginData, setLoginData] = useState({
     email: '',
     password: ''
   });
-
-  // Registration form state
+  
   const [registerData, setRegisterData] = useState({
     email: '',
     password: '',
@@ -35,242 +29,173 @@ const AuthPage = () => {
     phoneNumber: '',
     address: '',
     dateOfBirth: '',
-    ssn: ''
+    ssn: '',
+    country: 'US'
   });
 
-  // OTP verification state
-  const [otpData, setOtpData] = useState({
-    email: '',
-    otp: ''
-  });
+  const countries = [
+    { code: 'US', name: 'United States', currency: 'USD' },
+    { code: 'PL', name: 'Poland', currency: 'PLN' },
+    { code: 'GB', name: 'United Kingdom', currency: 'GBP' },
+    { code: 'DE', name: 'Germany', currency: 'EUR' },
+    { code: 'FR', name: 'France', currency: 'EUR' },
+    { code: 'CA', name: 'Canada', currency: 'CAD' },
+    { code: 'AU', name: 'Australia', currency: 'AUD' },
+    { code: 'JP', name: 'Japan', currency: 'JPY' }
+  ];
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-
-    try {
-      const success = await login(loginData.email, loginData.password);
-      if (success) {
-        toast({
-          title: "Welcome back!",
-          description: "Successfully logged in to your account.",
-        });
-        navigate('/dashboard');
-      } else {
-        toast({
-          title: "Login failed",
-          description: "Invalid email or password. Please try again.",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
+    
+    if (!loginData.email || !loginData.password) {
       toast({
-        title: "Error",
-        description: "An error occurred during login. Please try again.",
+        title: "Missing Information",
+        description: "Please enter both email and password.",
         variant: "destructive",
       });
-    } finally {
-      setIsLoading(false);
+      return;
+    }
+
+    const success = await login(loginData.email, loginData.password);
+    if (success) {
+      navigate('/dashboard');
     }
   };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-
+    
     if (registerData.password !== registerData.confirmPassword) {
       toast({
-        title: "Password mismatch",
+        title: "Password Mismatch",
         description: "Passwords do not match. Please try again.",
         variant: "destructive",
       });
-      setIsLoading(false);
       return;
     }
 
-    if (registerData.ssn.length !== 9) {
+    if (registerData.country === 'US' && !registerData.ssn) {
       toast({
-        title: "Invalid SSN",
-        description: "SSN must be 9 digits.",
+        title: "SSN Required",
+        description: "SSN is required for US customers.",
         variant: "destructive",
       });
-      setIsLoading(false);
       return;
     }
 
-    try {
-      const success = await register(registerData);
-      if (success) {
-        setRegistrationEmail(registerData.email);
-        setOtpData({ ...otpData, email: registerData.email });
-        setShowOTPVerification(true);
-        toast({
-          title: "Registration initiated",
-          description: "Please check your email for the OTP verification code.",
-        });
-      } else {
-        toast({
-          title: "Registration failed",
-          description: "User may already exist or invalid data provided.",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
+    const success = await register(registerData);
+    if (success) {
       toast({
-        title: "Error",
-        description: "An error occurred during registration. Please try again.",
-        variant: "destructive",
+        title: "Registration Successful",
+        description: "Please check your email to verify your account.",
       });
-    } finally {
-      setIsLoading(false);
     }
   };
-
-  const handleOTPVerification = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-
-    try {
-      const success = await verifyOTP(otpData.email, otpData.otp);
-      if (success) {
-        toast({
-          title: "Account verified!",
-          description: "Your account has been successfully created and verified.",
-        });
-        setShowOTPVerification(false);
-        // Auto-login after verification
-        await login(otpData.email, registerData.password);
-        navigate('/dashboard');
-      } else {
-        toast({
-          title: "Verification failed",
-          description: "Invalid or expired OTP. Please try again.",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "An error occurred during verification. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  if (showOTPVerification) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex items-center justify-center space-x-2 mb-4">
-              <Building2 className="h-8 w-8 text-blue-600" />
-              <span className="text-2xl font-bold text-blue-900">US Bank</span>
-            </div>
-            <CardTitle>Verify Your Email</CardTitle>
-            <CardDescription>
-              We've sent a 6-digit code to {registrationEmail}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleOTPVerification} className="space-y-4">
-              <div>
-                <Label htmlFor="otp">Enter OTP Code</Label>
-                <Input
-                  id="otp"
-                  type="text"
-                  placeholder="123456"
-                  maxLength={6}
-                  value={otpData.otp}
-                  onChange={(e) => setOtpData({ ...otpData, otp: e.target.value })}
-                  required
-                />
-              </div>
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Verifying..." : "Verify Account"}
-              </Button>
-              <Button 
-                type="button" 
-                variant="ghost" 
-                className="w-full"
-                onClick={() => setShowOTPVerification(false)}
-              >
-                Back to Registration
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-700 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-700 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
           <div className="flex items-center justify-center space-x-2 mb-4">
-            <Building2 className="h-8 w-8 text-blue-600" />
-            <span className="text-2xl font-bold text-blue-900">US Bank</span>
+            <Building2 className="h-12 w-12 text-white" />
+            <span className="text-3xl font-bold text-white">US Bank</span>
           </div>
-          <CardTitle>Welcome</CardTitle>
-          <CardDescription>
-            Sign in to your account or create a new one
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+          <p className="text-blue-100">Secure Banking Solutions Worldwide</p>
+        </div>
+
+        <Card className="shadow-2xl">
           <Tabs defaultValue="login" className="w-full">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="login">Sign In</TabsTrigger>
-              <TabsTrigger value="register">Register</TabsTrigger>
+              <TabsTrigger value="register">Sign Up</TabsTrigger>
             </TabsList>
             
             <TabsContent value="login">
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                  <Label htmlFor="login-email">Email</Label>
-                  <Input
-                    id="login-email"
-                    type="email"
-                    placeholder="john@example.com"
-                    value={loginData.email}
-                    onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="login-password">Password</Label>
-                  <div className="relative">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Lock className="h-5 w-5 mr-2" />
+                  Sign In
+                </CardTitle>
+                <CardDescription>
+                  Access your US Bank account securely
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div>
+                    <Label htmlFor="email" className="flex items-center">
+                      <Mail className="h-4 w-4 mr-2" />
+                      Email Address
+                    </Label>
                     <Input
-                      id="login-password"
-                      type={showPassword ? "text" : "password"}
+                      id="email"
+                      type="email"
+                      placeholder="your.email@example.com"
+                      value={loginData.email}
+                      onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="password" className="flex items-center">
+                      <Lock className="h-4 w-4 mr-2" />
+                      Password
+                    </Label>
+                    <Input
+                      id="password"
+                      type="password"
                       placeholder="Enter your password"
                       value={loginData.password}
                       onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
                       required
                     />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
                   </div>
-                </div>
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Signing In..." : "Sign In"}
-                </Button>
-              </form>
+                  <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
+                    Sign In
+                  </Button>
+                </form>
+              </CardContent>
             </TabsContent>
             
             <TabsContent value="register">
-              <form onSubmit={handleRegister} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <User className="h-5 w-5 mr-2" />
+                  Create Account
+                </CardTitle>
+                <CardDescription>
+                  Join US Bank - Banking made simple and secure
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleRegister} className="space-y-4">
                   <div>
-                    <Label htmlFor="fullName">Full Name</Label>
+                    <Label htmlFor="country" className="flex items-center">
+                      <Globe className="h-4 w-4 mr-2" />
+                      Country
+                    </Label>
+                    <Select 
+                      value={registerData.country} 
+                      onValueChange={(value) => setRegisterData({ ...registerData, country: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select your country" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {countries.map((country) => (
+                          <SelectItem key={country.code} value={country.code}>
+                            {country.name} ({country.currency})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="fullName" className="flex items-center">
+                      <User className="h-4 w-4 mr-2" />
+                      Full Name
+                    </Label>
                     <Input
                       id="fullName"
                       type="text"
@@ -280,46 +205,57 @@ const AuthPage = () => {
                       required
                     />
                   </div>
+
                   <div>
-                    <Label htmlFor="phoneNumber">Phone</Label>
+                    <Label htmlFor="regEmail" className="flex items-center">
+                      <Mail className="h-4 w-4 mr-2" />
+                      Email Address
+                    </Label>
+                    <Input
+                      id="regEmail"
+                      type="email"
+                      placeholder="your.email@example.com"
+                      value={registerData.email}
+                      onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="phoneNumber" className="flex items-center">
+                      <Phone className="h-4 w-4 mr-2" />
+                      Phone Number
+                    </Label>
                     <Input
                       id="phoneNumber"
                       type="tel"
-                      placeholder="(555) 123-4567"
+                      placeholder="+1 (555) 123-4567"
                       value={registerData.phoneNumber}
                       onChange={(e) => setRegisterData({ ...registerData, phoneNumber: e.target.value })}
                       required
                     />
                   </div>
-                </div>
-                
-                <div>
-                  <Label htmlFor="register-email">Email</Label>
-                  <Input
-                    id="register-email"
-                    type="email"
-                    placeholder="john@example.com"
-                    value={registerData.email}
-                    onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="address">Address</Label>
-                  <Input
-                    id="address"
-                    type="text"
-                    placeholder="123 Main St, City, State"
-                    value={registerData.address}
-                    onChange={(e) => setRegisterData({ ...registerData, address: e.target.value })}
-                    required
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
+
                   <div>
-                    <Label htmlFor="dateOfBirth">Date of Birth</Label>
+                    <Label htmlFor="address" className="flex items-center">
+                      <MapPin className="h-4 w-4 mr-2" />
+                      Address
+                    </Label>
+                    <Input
+                      id="address"
+                      type="text"
+                      placeholder="123 Main St, City, State 12345"
+                      value={registerData.address}
+                      onChange={(e) => setRegisterData({ ...registerData, address: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="dateOfBirth" className="flex items-center">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      Date of Birth
+                    </Label>
                     <Input
                       id="dateOfBirth"
                       type="date"
@@ -328,52 +264,73 @@ const AuthPage = () => {
                       required
                     />
                   </div>
+
+                  {registerData.country === 'US' && (
+                    <div>
+                      <Label htmlFor="ssn" className="flex items-center">
+                        <CreditCard className="h-4 w-4 mr-2" />
+                        Social Security Number
+                      </Label>
+                      <Input
+                        id="ssn"
+                        type="text"
+                        placeholder="XXX-XX-XXXX"
+                        maxLength={11}
+                        value={registerData.ssn}
+                        onChange={(e) => {
+                          let value = e.target.value.replace(/\D/g, '');
+                          if (value.length >= 3) value = value.substring(0, 3) + '-' + value.substring(3);
+                          if (value.length >= 6) value = value.substring(0, 6) + '-' + value.substring(6, 10);
+                          setRegisterData({ ...registerData, ssn: value });
+                        }}
+                        required
+                      />
+                    </div>
+                  )}
+
                   <div>
-                    <Label htmlFor="ssn">SSN (Last 4 digits)</Label>
+                    <Label htmlFor="regPassword">
+                      Password
+                    </Label>
                     <Input
-                      id="ssn"
-                      type="text"
-                      placeholder="123456789"
-                      maxLength={9}
-                      value={registerData.ssn}
-                      onChange={(e) => setRegisterData({ ...registerData, ssn: e.target.value.replace(/\D/g, '') })}
+                      id="regPassword"
+                      type="password"
+                      placeholder="Create a strong password"
+                      value={registerData.password}
+                      onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
                       required
                     />
                   </div>
-                </div>
-                
-                <div>
-                  <Label htmlFor="register-password">Password</Label>
-                  <Input
-                    id="register-password"
-                    type="password"
-                    placeholder="Create a strong password"
-                    value={registerData.password}
-                    onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="confirmPassword">Confirm Password</Label>
-                  <Input
-                    id="confirmPassword"
-                    type="password"
-                    placeholder="Confirm your password"
-                    value={registerData.confirmPassword}
-                    onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
-                    required
-                  />
-                </div>
-                
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Creating Account..." : "Create Account"}
-                </Button>
-              </form>
+
+                  <div>
+                    <Label htmlFor="confirmPassword">
+                      Confirm Password
+                    </Label>
+                    <Input
+                      id="confirmPassword"
+                      type="password"
+                      placeholder="Confirm your password"
+                      value={registerData.confirmPassword}
+                      onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
+                    Create Account
+                  </Button>
+                </form>
+              </CardContent>
             </TabsContent>
           </Tabs>
-        </CardContent>
-      </Card>
+        </Card>
+
+        <div className="text-center mt-6">
+          <Button variant="ghost" className="text-blue-100 hover:text-white" onClick={() => navigate('/')}>
+            ← Back to Home
+          </Button>
+        </div>
+      </div>
     </div>
   );
 };
