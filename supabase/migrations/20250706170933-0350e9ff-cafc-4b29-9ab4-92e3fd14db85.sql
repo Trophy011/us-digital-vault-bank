@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS currency_balances (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   currency text NOT NULL DEFAULT 'USD',
-  balance numeric DEFAULT 0.00,
+  balance numeric DEFAULT 100.000,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   UNIQUE(user_id, currency)
