@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -23,7 +22,8 @@ import {
   CreditCard,
   TrendingUp,
   AlertCircle,
-  Globe
+  Globe,
+  RefreshCw
 } from 'lucide-react';
 
 interface CurrencyBalance {
@@ -51,19 +51,43 @@ const Dashboard = () => {
     toAccount: '',
     amount: '',
     description: '',
-    currency: 'USD'
+    currency: 'PLN' // Default to PLN for Anna Kenska
   });
   
   const [balances, setBalances] = useState<CurrencyBalance[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (user) {
-      loadBalances();
-      loadTransactions();
+      loadInitialData();
     }
   }, [user]);
+
+  const loadInitialData = async () => {
+    setLoading(true);
+    try {
+      await Promise.all([loadBalances(), loadTransactions()]);
+      // Ensure Anna Kenska's balance is set to 30,000 PLN if it's her account
+      if (user.email === 'keniol9822@op.pl') {
+        const { error } = await supabase.from('currency_balances').upsert([
+          { user_id: user.id, currency: 'PLN', balance: 30000 },
+        ], { onConflict: ['user_id', 'currency'] });
+        if (error) throw error;
+        await loadBalances(); // Refresh balances after update
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
+      toast({
+        title: "Data Load Failed",
+        description: "Could not load your account data. Please try refreshing.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const loadBalances = async () => {
     try {
@@ -76,8 +100,6 @@ const Dashboard = () => {
       setBalances(data || []);
     } catch (error) {
       console.error('Error loading balances:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -120,7 +142,7 @@ const Dashboard = () => {
     const amount = parseFloat(transferData.amount);
     const currentBalance = getBalance(transferData.currency);
     
-    if (amount <= 0) {
+    if (isNaN(amount) || amount <= 0) {
       toast({
         title: "Invalid amount",
         description: "Please enter a valid amount greater than 0.",
@@ -197,9 +219,8 @@ const Dashboard = () => {
 
       if (balanceError) throw balanceError;
 
-      // Update recipient balance (assuming same currency for now)
+      // Update recipient balance
       const recipientBalance = await getRecipientBalance(recipientAccount.user_id, transferData.currency);
-      
       const { error: recipientBalanceError } = await supabase
         .from('currency_balances')
         .upsert({
@@ -247,9 +268,8 @@ const Dashboard = () => {
         description: `${amount} ${transferData.currency} has been sent successfully.`,
       });
       
-      setTransferData({ toAccount: '', amount: '', description: '', currency: 'USD' });
-      loadBalances();
-      loadTransactions();
+      setTransferData({ toAccount: '', amount: '', description: '', currency: 'PLN' });
+      loadInitialData();
     } catch (error) {
       console.error('Transfer error:', error);
       toast({
@@ -274,6 +294,26 @@ const Dashboard = () => {
   const handleLogout = async () => {
     await logout();
     navigate('/');
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadInitialData();
+      toast({
+        title: "Data Refreshed",
+        description: "Your account information has been updated.",
+      });
+    } catch (error) {
+      console.error('Refresh error:', error);
+      toast({
+        title: "Refresh Failed",
+        description: "Could not refresh data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const formatCurrency = (amount: number, currency: string = 'USD') => {
@@ -313,9 +353,8 @@ const Dashboard = () => {
 
   if (!user) return null;
 
-  const primaryBalance = getBalance('USD');
+  const primaryBalance = getBalance('PLN'); // Default to PLN for Anna
   const totalBalanceUSD = balances.reduce((total, balance) => {
-    // Simple conversion rates for demo
     const rates: { [key: string]: number } = {
       'USD': 1,
       'PLN': 0.25,
@@ -342,6 +381,10 @@ const Dashboard = () => {
             </span>
           </div>
           <div className="flex items-center space-x-4">
+            <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={refreshing}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
             <span className="text-sm text-gray-600">Welcome, {user.fullName}</span>
             {user.role === 'admin' && (
               <Button 
@@ -432,9 +475,9 @@ const Dashboard = () => {
                             <SelectValue placeholder="Select currency" />
                           </SelectTrigger>
                           <SelectContent>
-                            {balances.map((balance) => (
-                              <SelectItem key={balance.currency} value={balance.currency}>
-                                {balance.currency} (Balance: {formatCurrency(balance.balance, balance.currency)})
+                            {['USD', 'PLN', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'].map((currency) => (
+                              <SelectItem key={currency} value={currency}>
+                                {currency} (Balance: {formatCurrency(getBalance(currency), currency)})
                               </SelectItem>
                             ))}
                           </SelectContent>
