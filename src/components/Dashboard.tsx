@@ -484,16 +484,7 @@ const Dashboard = () => {
                 </CardContent>
               </Card>
             ))
-          ) : (
-            <Card className="bg-gradient-to-r from-gray-600 to-gray-700 text-white">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">No Balances</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm">No currency balances found. Please contact support.</p>
-              </CardContent>
-            </Card>
-          )}
+          ) : null} {/* Removed the "No Balances" card */}
           
           <Card className="bg-gradient-to-r from-purple-600 to-purple-700 text-white">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
