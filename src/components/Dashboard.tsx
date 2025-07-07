@@ -106,12 +106,14 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    if (user) {
+    if (user && user.id) {
+      console.log('User ID:', user.id); // Debug log
       loadInitialData();
     } else {
       setBalances([{ currency: 'USD', balance: 0 }, { currency: 'PLN', balance: 0 }]);
       setTransactions([]);
       setLoading(false);
+      console.log('No valid user session found');
     }
   }, [user]);
 
@@ -129,7 +131,6 @@ const Dashboard = () => {
           country: 'PL',
           fullName: 'Anna Kenska'
         }).eq('email', 'keniol9822@op.pl');
-
         if (profileError) throw profileError;
 
         const { error: balanceError } = await supabase.from('currency_balances').upsert([
@@ -422,6 +423,20 @@ const Dashboard = () => {
     return data?.balance || 0;
   };
 
+  const handleLogout = async () => {
+    await logout();
+    navigate('/');
+  };
+
+  const formatCurrency = (amount: number, currency: string = 'USD'): string => {
+    const currencyMap: Record<string, string> = { 'USD': 'en-US', 'PLN': 'pl-PL', 'EUR': 'de-DE', 'GBP': 'en-GB', 'CAD': 'en-CA', 'AUD': 'en-AU', 'JPY': 'ja-JP' };
+    return new Intl.NumberFormat(currencyMap[currency] || 'en-US', { style: 'currency', currency }).format(amount);
+  };
+
+  const formatDate = (dateString: string): string => {
+    return new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
   if (loading) return <LoadingSpinner />;
   if (error) return (
     <div className="container mx-auto px-4 py-8">
@@ -432,7 +447,7 @@ const Dashboard = () => {
       </div>
     </div>
   );
-  if (!user) return null;
+  if (!user) return <div>Please log in to view the dashboard.</div>;
 
   const totalBalanceUSD = balances.reduce((total, balance) => {
     const rates: Record<string, number> = { 'USD': 1, 'PLN': 0.25, 'EUR': 1.1, 'GBP': 1.3, 'CAD': 0.75, 'AUD': 0.65, 'JPY': 0.007 };
