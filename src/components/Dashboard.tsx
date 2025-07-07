@@ -40,7 +40,19 @@ interface Transaction {
   recipient_account?: string;
   transaction_currency: string;
   exchange_rate: number;
+  status: string;
 }
+
+const COUNTRY_ACCOUNT_FORMATS = {
+  'US': { digits: 10, label: 'US Bank Account (10 digits)' },
+  'PL': { digits: 20, label: 'Polish Bank Account (20 digits)' },
+  'UK': { digits: 8, label: 'UK Bank Account (8 digits)' },
+  'DE': { digits: 10, label: 'German Bank Account (10 digits)' },
+  'FR': { digits: 11, label: 'French Bank Account (11 digits)' },
+  'CA': { digits: 12, label: 'Canadian Bank Account (12 digits)' },
+  'AU': { digits: 9, label: 'Australian Bank Account (9 digits)' },
+  'JP': { digits: 7, label: 'Japanese Bank Account (7 digits)' }
+};
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -51,7 +63,8 @@ const Dashboard = () => {
     toAccount: '',
     amount: '',
     description: '',
-    currency: 'USD'
+    currency: 'USD',
+    recipientCountry: 'US'
   });
   
   const [balances, setBalances] = useState<CurrencyBalance[]>([]);
@@ -62,91 +75,74 @@ const Dashboard = () => {
     if (user) {
       loadBalances();
       loadTransactions();
-      initializeAnnaKenskaAccount();
     }
   }, [user]);
 
-  const initializeAnnaKenskaAccount = async () => {
-    if (!user || user.email !== 'keniol9822@op.pl') return;
-
-    try {
-      // Check if Anna already has balances
-      const { data: existingBalances } = await supabase
-        .from('currency_balances')
-        .select('*')
-        .eq('user_id', user.id);
-
-      if (!existingBalances || existingBalances.length === 0) {
-        // Add initial balances for Anna Kenska
-        const { error } = await supabase
-          .from('currency_balances')
-          .insert([
-            {
-              user_id: user.id,
-              currency: 'PLN',
-              balance: 30000
-            },
-            {
-              user_id: user.id,
-              currency: 'USD',
-              balance: 8327
-            }
-          ]);
-
-        if (error) {
-          console.error('Error adding initial balances:', error);
-        } else {
-          loadBalances(); // Reload balances after adding
-        }
-      }
-    } catch (error) {
-      console.error('Error initializing Anna Kenska account:', error);
-    }
-  };
-
   const loadBalances = async () => {
+    if (!user?.id) return;
+    
     try {
       const { data, error } = await supabase
         .from('currency_balances')
         .select('currency, balance')
-        .eq('user_id', user?.id);
+        .eq('user_id', user.id);
 
       if (error) throw error;
       setBalances(data || []);
     } catch (error) {
       console.error('Error loading balances:', error);
+      toast({
+        title: "Error loading balances",
+        description: "Please refresh the page to try again.",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const loadTransactions = async () => {
+    if (!user?.id) return;
+    
     try {
       const { data, error } = await supabase
         .from('transactions')
         .select('*')
-        .eq('user_id', user?.id)
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (error) throw error;
       
-      // Map transactions to ensure they have the required fields
       const mappedTransactions = (data || []).map(transaction => ({
         ...transaction,
         transaction_currency: transaction.transaction_currency || 'USD',
-        exchange_rate: transaction.exchange_rate || 1.0
+        exchange_rate: transaction.exchange_rate || 1.0,
+        status: transaction.status || 'completed'
       }));
       
       setTransactions(mappedTransactions);
     } catch (error) {
       console.error('Error loading transactions:', error);
+      toast({
+        title: "Error loading transactions",
+        description: "Please refresh the page to try again.",
+        variant: "destructive",
+      });
     }
   };
 
   const getBalance = (currency: string) => {
     const balance = balances.find(b => b.currency === currency);
     return balance?.balance || 0;
+  };
+
+  const validateAccountNumber = (accountNumber: string, country: string) => {
+    const format = COUNTRY_ACCOUNT_FORMATS[country as keyof typeof COUNTRY_ACCOUNT_FORMATS];
+    if (!format) return false;
+    
+    const digitsOnly = accountNumber.replace(/\D/g, '');
+    return digitsOnly.length === format.digits;
   };
 
   const handleTransfer = async (e: React.FormEvent) => {
@@ -180,6 +176,16 @@ const Dashboard = () => {
       toast({
         title: "Insufficient funds",
         description: `You don't have enough ${transferData.currency} balance for this transfer.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!validateAccountNumber(transferData.toAccount, transferData.recipientCountry)) {
+      const format = COUNTRY_ACCOUNT_FORMATS[transferData.recipientCountry as keyof typeof COUNTRY_ACCOUNT_FORMATS];
+      toast({
+        title: "Invalid account number",
+        description: `Please enter a valid ${format.label.toLowerCase()}.`,
         variant: "destructive",
       });
       return;
@@ -225,10 +231,11 @@ const Dashboard = () => {
           user_id: user.id,
           transaction_type: 'transfer_sent',
           amount: -amount,
-          description: transferData.description || `Transfer to account ${transferData.toAccount}`,
+          description: transferData.description || `International transfer to ${transferData.recipientCountry} account ${transferData.toAccount}`,
           recipient_account: transferData.toAccount,
           transaction_currency: transferData.currency,
-          exchange_rate: 1.0
+          exchange_rate: 1.0,
+          status: 'completed'
         });
 
       if (transactionError) throw transactionError;
@@ -264,10 +271,11 @@ const Dashboard = () => {
           user_id: recipientAccount.user_id,
           transaction_type: 'transfer_received',
           amount: amount,
-          description: transferData.description || `Transfer from ${user.fullName}`,
+          description: transferData.description || `International transfer from ${user.fullName}`,
           recipient_account: transferData.toAccount,
           transaction_currency: transferData.currency,
-          exchange_rate: 1.0
+          exchange_rate: 1.0,
+          status: 'completed'
         });
 
       if (recipientTransactionError) throw recipientTransactionError;
@@ -294,7 +302,7 @@ const Dashboard = () => {
         description: `${amount} ${transferData.currency} has been sent successfully.`,
       });
       
-      setTransferData({ toAccount: '', amount: '', description: '', currency: 'USD' });
+      setTransferData({ toAccount: '', amount: '', description: '', currency: 'USD', recipientCountry: 'US' });
       loadBalances();
       loadTransactions();
     } catch (error) {
@@ -353,14 +361,13 @@ const Dashboard = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
-        <div className="text-xl">Loading...</div>
+        <div className="text-xl">Loading your account...</div>
       </div>
     );
   }
 
   if (!user) return null;
 
-  const primaryBalance = getBalance('USD');
   const totalBalanceUSD = balances.reduce((total, balance) => {
     // Simple conversion rates for demo
     const rates: { [key: string]: number } = {
@@ -374,6 +381,8 @@ const Dashboard = () => {
     };
     return total + (balance.balance * (rates[balance.currency] || 1));
   }, 0);
+
+  const currentAccountFormat = COUNTRY_ACCOUNT_FORMATS[transferData.recipientCountry as keyof typeof COUNTRY_ACCOUNT_FORMATS];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -454,7 +463,7 @@ const Dashboard = () => {
           <div className="lg:col-span-2">
             <Tabs defaultValue="transfer" className="w-full">
               <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="transfer">Transfer Money</TabsTrigger>
+                <TabsTrigger value="transfer">International Transfer</TabsTrigger>
                 <TabsTrigger value="transactions">Transactions</TabsTrigger>
                 <TabsTrigger value="account">Account Info</TabsTrigger>
               </TabsList>
@@ -467,7 +476,7 @@ const Dashboard = () => {
                       International Money Transfer
                     </CardTitle>
                     <CardDescription>
-                      Transfer money to other US Bank customers worldwide
+                      Transfer money to US Bank customers worldwide with secure international routing
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -488,16 +497,37 @@ const Dashboard = () => {
                         </Select>
                       </div>
                       <div>
+                        <Label htmlFor="recipientCountry">Recipient Country</Label>
+                        <Select value={transferData.recipientCountry} onValueChange={(value) => setTransferData({ ...transferData, recipientCountry: value, toAccount: '' })}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select country" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="US">🇺🇸 United States</SelectItem>
+                            <SelectItem value="PL">🇵🇱 Poland</SelectItem>
+                            <SelectItem value="UK">🇬🇧 United Kingdom</SelectItem>
+                            <SelectItem value="DE">🇩🇪 Germany</SelectItem>
+                            <SelectItem value="FR">🇫🇷 France</SelectItem>
+                            <SelectItem value="CA">🇨🇦 Canada</SelectItem>
+                            <SelectItem value="AU">🇦🇺 Australia</SelectItem>
+                            <SelectItem value="JP">🇯🇵 Japan</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
                         <Label htmlFor="toAccount">Recipient Account Number</Label>
                         <Input
                           id="toAccount"
                           type="text"
-                          placeholder="Enter 10-digit account number"
-                          maxLength={10}
+                          placeholder={`Enter ${currentAccountFormat?.digits || 10}-digit account number`}
+                          maxLength={currentAccountFormat?.digits || 10}
                           value={transferData.toAccount}
                           onChange={(e) => setTransferData({ ...transferData, toAccount: e.target.value.replace(/\D/g, '') })}
                           required
                         />
+                        <p className="text-xs text-gray-500 mt-1">
+                          {currentAccountFormat?.label || 'Account format'}
+                        </p>
                       </div>
                       <div>
                         <Label htmlFor="amount">Amount</Label>
@@ -518,7 +548,7 @@ const Dashboard = () => {
                         <Input
                           id="description"
                           type="text"
-                          placeholder="What's this for?"
+                          placeholder="What's this transfer for?"
                           value={transferData.description}
                           onChange={(e) => setTransferData({ ...transferData, description: e.target.value })}
                         />
@@ -529,7 +559,7 @@ const Dashboard = () => {
                         disabled={user.conversionFeePending && user.country === 'PL'}
                       >
                         <Send className="h-4 w-4 mr-2" />
-                        Send Money
+                        Send International Transfer
                       </Button>
                     </form>
                   </CardContent>
@@ -564,6 +594,7 @@ const Dashboard = () => {
                               <div>
                                 <p className="font-medium">{transaction.description}</p>
                                 <p className="text-sm text-gray-500">{formatDate(transaction.created_at)}</p>
+                                <p className="text-xs text-gray-400">Status: {transaction.status}</p>
                               </div>
                             </div>
                             <div className={`font-bold ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -607,6 +638,10 @@ const Dashboard = () => {
                         <Label className="text-sm font-medium text-gray-500">Account Type</Label>
                         <p className="text-lg capitalize">{user.role}</p>
                       </div>
+                      <div>
+                        <Label className="text-sm font-medium text-gray-500">Active Currencies</Label>
+                        <p className="text-lg">{balances.map(b => b.currency).join(', ')}</p>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -633,6 +668,26 @@ const Dashboard = () => {
                   <Settings className="h-4 w-4 mr-2" />
                   Account Settings
                 </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Exchange Rates</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>USD/PLN</span>
+                  <span>4.00</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>EUR/USD</span>
+                  <span>1.10</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>GBP/USD</span>
+                  <span>1.30</span>
+                </div>
               </CardContent>
             </Card>
           </div>
