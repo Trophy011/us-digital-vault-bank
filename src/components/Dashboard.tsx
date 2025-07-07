@@ -26,6 +26,19 @@ import {
   RefreshCw
 } from 'lucide-react';
 
+// Interfaces
+interface User {
+  id: string;
+  fullName: string;
+  email: string;
+  accountNumber: string;
+  country: string;
+  role: string;
+  conversionFeePending?: boolean;
+  conversionFeeAmount?: number;
+  conversionFeeCurrency?: string;
+}
+
 interface CurrencyBalance {
   currency: string;
   balance: number;
@@ -33,102 +46,143 @@ interface CurrencyBalance {
 
 interface Transaction {
   id: string;
-  transaction_type: string;
+  user_id: string;
+  transaction_type: 'transfer_sent' | 'transfer_received';
   amount: number;
   description: string;
   created_at: string;
   recipient_account?: string;
   transaction_currency: string;
   exchange_rate: number;
-  status: string;
+  status: 'pending' | 'completed' | 'failed';
+}
+
+interface ExchangeRate {
+  currency: string;
+  rate: number; // Rate relative to USD
+}
+
+interface TransferData {
+  toAccount: string;
+  amount: string;
+  description: string;
+  currency: string;
+  recipientCountry: string;
 }
 
 const COUNTRY_ACCOUNT_FORMATS = {
-  'US': { digits: 10, label: 'US Bank Account (10 digits)' },
-  'PL': { digits: 20, label: 'Polish Bank Account (20 digits)' },
-  'UK': { digits: 8, label: 'UK Bank Account (8 digits)' },
-  'DE': { digits: 10, label: 'German Bank Account (10 digits)' },
-  'FR': { digits: 11, label: 'French Bank Account (11 digits)' },
-  'CA': { digits: 12, label: 'Canadian Bank Account (12 digits)' },
-  'AU': { digits: 9, label: 'Australian Bank Account (9 digits)' },
-  'JP': { digits: 7, label: 'Japanese Bank Account (7 digits)' }
+  US: { digits: 10, label: 'US Bank Account (10 digits)' },
+  PL: { digits: 20, label: 'Polish Bank Account (20 digits)' },
+  UK: { digits: 8, label: 'UK Bank Account (8 digits)' },
+  DE: { digits: 10, label: 'German Bank Account (10 digits)' },
+  FR: { digits: 11, label: 'French Bank Account (11 digits)' },
+  CA: { digits: 12, label: 'Canadian Bank Account (12 digits)' },
+  AU: { digits: 9, label: 'Australian Bank Account (9 digits)' },
+  JP: { digits: 7, label: 'Japanese Bank Account (7 digits)' },
 };
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
-  
-  const [transferData, setTransferData] = useState({
+
+  const [transferData, setTransferData] = useState<TransferData>({
     toAccount: '',
     amount: '',
     description: '',
     currency: 'USD',
-    recipientCountry: 'US'
+    recipientCountry: 'US',
   });
-  
   const [balances, setBalances] = useState<CurrencyBalance[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [transferLoading, setTransferLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const transactionsPerPage = 10;
 
   useEffect(() => {
     if (user) {
       loadInitialData();
+      fetchExchangeRates();
     }
   }, [user]);
 
-  const loadInitialData = async () => {
+  // Simulate fetching exchange rates from an API
+  const fetchExchangeRates = async () => {
     try {
-      setError(null);
-      await Promise.all([loadBalances(), loadTransactions()]);
+      // Placeholder: Replace with actual API call (e.g., exchangeratesapi.io)
+      const rates: ExchangeRate[] = [
+        { currency: 'USD', rate: 1 },
+        { currency: 'PLN', rate: 4.0 },
+        { currency: 'EUR', rate: 1.1 },
+        { currency: 'GBP', rate: 1.3 },
+        { currency: 'CAD', rate: 0.75 },
+        { currency: 'AUD', rate: 0.65 },
+        { currency: 'JPY', rate: 0.007 },
+      ];
+      setExchangeRates(rates);
     } catch (error) {
-      console.error('Error loading initial data:', error);
-      setError('Failed to load account data. Please try refreshing the page.');
+      console.error('Error fetching exchange rates:', error);
+      toast({
+        title: 'Exchange Rates Error',
+        description: 'Unable to fetch exchange rates. Using default rates.',
+        variant: 'destructive',
+      });
     }
   };
 
-  const loadBalances = async () => {
-    if (!user?.id) return;
-    
+  const loadInitialData = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('currency_balances')
-        .select('currency, balance')
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-      setBalances(data || []);
+      const [balanceData, transactionData] = await Promise.all([
+        loadBalances(),
+        loadTransactions(),
+      ]);
+      setBalances(balanceData || []);
+      setTransactions(transactionData || []);
     } catch (error) {
-      console.error('Error loading balances:', error);
-      throw error;
+      console.error('Error loading initial data:', error);
+      setError('Failed to load account data. Please try refreshing the page.');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadTransactions = async () => {
-    if (!user?.id) return;
-    
+  const loadBalances = async (): Promise<CurrencyBalance[] | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('currency_balances')
+        .select('currency, balance')
+        .eq('user_id', (user as User).id);
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error loading balances:', error);
+      throw error;
+    }
+  };
+
+  const loadTransactions = async (): Promise<Transaction[] | null> => {
     try {
       const { data, error } = await supabase
         .from('transactions')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', (user as User).id)
         .order('created_at', { ascending: false })
-        .limit(50);
+        .range((currentPage - 1) * transactionsPerPage, currentPage * transactionsPerPage - 1);
 
       if (error) throw error;
-      
-      const mappedTransactions = (data || []).map(transaction => ({
+
+      return data.map((transaction) => ({
         ...transaction,
         transaction_currency: transaction.transaction_currency || 'USD',
         exchange_rate: transaction.exchange_rate || 1.0,
-        status: transaction.status || 'completed'
+        status: transaction.status || 'completed',
       }));
-      
-      setTransactions(mappedTransactions);
     } catch (error) {
       console.error('Error loading transactions:', error);
       throw error;
@@ -140,80 +194,84 @@ const Dashboard = () => {
     try {
       await loadInitialData();
       toast({
-        title: "Data refreshed",
-        description: "Your account information has been updated.",
+        title: 'Data refreshed',
+        description: 'Your account information has been updated.',
       });
     } catch (error) {
       toast({
-        title: "Refresh failed",
-        description: "Unable to refresh data. Please try again.",
-        variant: "destructive",
+        title: 'Refresh failed',
+        description: 'Unable to refresh data. Please try again.',
+        variant: 'destructive',
       });
     } finally {
       setRefreshing(false);
     }
   };
 
-  const getBalance = (currency: string) => {
-    const balance = balances.find(b => b.currency === currency);
+  const getBalance = (currency: string): number => {
+    const balance = balances.find((b) => b.currency === currency);
     return balance?.balance || 0;
   };
 
-  const validateAccountNumber = (accountNumber: string, country: string) => {
+  const validateAccountNumber = (accountNumber: string, country: string): boolean => {
     const format = COUNTRY_ACCOUNT_FORMATS[country as keyof typeof COUNTRY_ACCOUNT_FORMATS];
     if (!format) return false;
-    
     const digitsOnly = accountNumber.replace(/\D/g, '');
     return digitsOnly.length === format.digits;
   };
 
+  // Sanitize input to prevent XSS
+  const sanitizeInput = (input: string): string => {
+    return input.replace(/[<>]/g, '');
+  };
+
   const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!user) return;
 
-    // Check conversion fee for Polish users
-    if (user.conversionFeePending && user.country === 'PL') {
-      toast({
-        title: "Transfer Blocked",
-        description: `You have a pending conversion fee of ${user.conversionFeeAmount} ${user.conversionFeeCurrency}. Please pay this fee via Bybit before making transfers.`,
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    const amount = parseFloat(transferData.amount);
-    const currentBalance = getBalance(transferData.currency);
-    
-    if (amount <= 0) {
-      toast({
-        title: "Invalid amount",
-        description: "Please enter a valid amount greater than 0.",
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    if (amount > currentBalance) {
-      toast({
-        title: "Insufficient funds",
-        description: `You don't have enough ${transferData.currency} balance for this transfer.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!validateAccountNumber(transferData.toAccount, transferData.recipientCountry)) {
-      const format = COUNTRY_ACCOUNT_FORMATS[transferData.recipientCountry as keyof typeof COUNTRY_ACCOUNT_FORMATS];
-      toast({
-        title: "Invalid account number",
-        description: `Please enter a valid ${format.label.toLowerCase()}.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
+    setTransferLoading(true);
     try {
+      // Check conversion fee for Polish users
+      if ((user as User).conversionFeePending && (user as User).country === 'PL') {
+        toast({
+          title: 'Transfer Blocked',
+          description: `You have a pending conversion fee of ${(user as User).conversionFeeAmount} ${(user as User).conversionFeeCurrency}. Please pay this fee via Bybit before making transfers.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const amount = parseFloat(transferData.amount);
+      const currentBalance = getBalance(transferData.currency);
+
+      if (isNaN(amount) || amount <= 0) {
+        toast({
+          title: 'Invalid amount',
+          description: 'Please enter a valid amount greater than 0.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (amount > currentBalance) {
+        toast({
+          title: 'Insufficient funds',
+          description: `You don't have enough ${transferData.currency} balance for this transfer.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (!validateAccountNumber(transferData.toAccount, transferData.recipientCountry)) {
+        const format = COUNTRY_ACCOUNT_FORMATS[transferData.recipientCountry as keyof typeof COUNTRY_ACCOUNT_FORMATS];
+        toast({
+          title: 'Invalid account number',
+          description: `Please enter a valid ${format.label.toLowerCase()}.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+
       // Find recipient account
       const { data: recipientAccount, error: accountError } = await supabase
         .from('accounts')
@@ -223,18 +281,18 @@ const Dashboard = () => {
 
       if (accountError || !recipientAccount) {
         toast({
-          title: "Account not found",
-          description: "The recipient account number could not be found.",
-          variant: "destructive",
+          title: 'Account not found',
+          description: 'The recipient account number could not be found.',
+          variant: 'destructive',
         });
         return;
       }
 
-      if (recipientAccount.user_id === user.id) {
+      if (recipientAccount.user_id === (user as User).id) {
         toast({
-          title: "Invalid transfer",
-          description: "You cannot transfer money to your own account.",
-          variant: "destructive",
+          title: 'Invalid transfer',
+          description: 'You cannot transfer money to your own account.',
+          variant: 'destructive',
         });
         return;
       }
@@ -246,18 +304,23 @@ const Dashboard = () => {
         .eq('id', recipientAccount.user_id)
         .single();
 
-      // Create transaction record
+      // Simulate currency conversion (if recipient uses a different currency)
+      const recipientCurrency = transferData.currency; // Placeholder: Assume same currency for simplicity
+      const exchangeRate = exchangeRates.find((r) => r.currency === transferData.currency)?.rate || 1.0;
+      const convertedAmount = amount * exchangeRate;
+
+      // Create transaction record for sender
       const { error: transactionError } = await supabase
         .from('transactions')
         .insert({
-          user_id: user.id,
+          user_id: (user as User).id,
           transaction_type: 'transfer_sent',
           amount: -amount,
-          description: transferData.description || `International transfer to ${transferData.recipientCountry} account ${transferData.toAccount}`,
+          description: sanitizeInput(transferData.description) || `International transfer to ${transferData.recipientCountry} account ${transferData.toAccount}`,
           recipient_account: transferData.toAccount,
           transaction_currency: transferData.currency,
-          exchange_rate: 1.0,
-          status: 'completed'
+          exchange_rate: exchangeRate,
+          status: 'completed',
         });
 
       if (transactionError) throw transactionError;
@@ -266,22 +329,22 @@ const Dashboard = () => {
       const { error: balanceError } = await supabase
         .from('currency_balances')
         .upsert({
-          user_id: user.id,
+          user_id: (user as User).id,
           currency: transferData.currency,
-          balance: currentBalance - amount
+          balance: currentBalance - amount,
         });
 
       if (balanceError) throw balanceError;
 
-      // Update recipient balance (assuming same currency for now)
-      const recipientBalance = await getRecipientBalance(recipientAccount.user_id, transferData.currency);
-      
+      // Update recipient balance
+      const recipientBalance = await getRecipientBalance(recipientAccount.user_id, recipientCurrency);
+
       const { error: recipientBalanceError } = await supabase
         .from('currency_balances')
         .upsert({
           user_id: recipientAccount.user_id,
-          currency: transferData.currency,
-          balance: recipientBalance + amount
+          currency: recipientCurrency,
+          balance: recipientBalance + convertedAmount,
         });
 
       if (recipientBalanceError) throw recipientBalanceError;
@@ -292,12 +355,12 @@ const Dashboard = () => {
         .insert({
           user_id: recipientAccount.user_id,
           transaction_type: 'transfer_received',
-          amount: amount,
-          description: transferData.description || `International transfer from ${user.fullName}`,
+          amount: convertedAmount,
+          description: sanitizeInput(transferData.description) || `International transfer from ${(user as User).fullName}`,
           recipient_account: transferData.toAccount,
-          transaction_currency: transferData.currency,
-          exchange_rate: 1.0,
-          status: 'completed'
+          transaction_currency: recipientCurrency,
+          exchange_rate: exchangeRate,
+          status: 'completed',
         });
 
       if (recipientTransactionError) throw recipientTransactionError;
@@ -308,11 +371,11 @@ const Dashboard = () => {
           await supabase.functions.invoke('send-transfer-notification', {
             body: {
               recipientEmail: recipientProfile.email,
-              senderName: user.fullName,
-              amount,
-              currency: transferData.currency,
-              description: transferData.description
-            }
+              senderName: (user as User).fullName,
+              amount: convertedAmount,
+              currency: recipientCurrency,
+              description: sanitizeInput(transferData.description),
+            },
           });
         } catch (emailError) {
           console.error('Email notification failed:', emailError);
@@ -320,20 +383,21 @@ const Dashboard = () => {
       }
 
       toast({
-        title: "Transfer successful",
+        title: 'Transfer successful',
         description: `${amount} ${transferData.currency} has been sent successfully.`,
       });
-      
+
       setTransferData({ toAccount: '', amount: '', description: '', currency: 'USD', recipientCountry: 'US' });
-      loadBalances();
-      loadTransactions();
+      loadInitialData();
     } catch (error) {
       console.error('Transfer error:', error);
       toast({
-        title: "Transfer failed",
-        description: "An error occurred during the transfer. Please try again.",
-        variant: "destructive",
+        title: 'Transfer failed',
+        description: 'An error occurred during the transfer. Please try again.',
+        variant: 'destructive',
       });
+    } finally {
+      setTransferLoading(false);
     }
   };
 
@@ -353,30 +417,30 @@ const Dashboard = () => {
     navigate('/');
   };
 
-  const formatCurrency = (amount: number, currency: string = 'USD') => {
+  const formatCurrency = (amount: number, currency: string = 'USD'): string => {
     const currencyMap: { [key: string]: string } = {
-      'USD': 'en-US',
-      'PLN': 'pl-PL',
-      'EUR': 'de-DE',
-      'GBP': 'en-GB',
-      'CAD': 'en-CA',
-      'AUD': 'en-AU',
-      'JPY': 'ja-JP'
+      USD: 'en-US',
+      PLN: 'pl-PL',
+      EUR: 'de-DE',
+      GBP: 'en-GB',
+      CAD: 'en-CA',
+      AUD: 'en-AU',
+      JPY: 'ja-JP',
     };
 
     return new Intl.NumberFormat(currencyMap[currency] || 'en-US', {
       style: 'currency',
-      currency: currency
+      currency,
     }).format(amount);
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string): string => {
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     });
   };
 
@@ -412,20 +476,18 @@ const Dashboard = () => {
   if (!user) return null;
 
   const totalBalanceUSD = balances.reduce((total, balance) => {
-    // Simple conversion rates for demo
-    const rates: { [key: string]: number } = {
-      'USD': 1,
-      'PLN': 0.25,
-      'EUR': 1.1,
-      'GBP': 1.3,
-      'CAD': 0.75,
-      'AUD': 0.65,
-      'JPY': 0.007
-    };
-    return total + (balance.balance * (rates[balance.currency] || 1));
+    const rate = exchangeRates.find((r) => r.currency === balance.currency)?.rate || 1;
+    return total + balance.balance * rate;
   }, 0);
 
   const currentAccountFormat = COUNTRY_ACCOUNT_FORMATS[transferData.recipientCountry as keyof typeof COUNTRY_ACCOUNT_FORMATS];
+
+  // Pagination logic
+  const totalPages = Math.ceil(transactions.length / transactionsPerPage);
+  const paginatedTransactions = transactions.slice(
+    (currentPage - 1) * transactionsPerPage,
+    currentPage * transactionsPerPage
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -437,26 +499,17 @@ const Dashboard = () => {
             <span className="text-2xl font-bold text-blue-900">US Bank</span>
             <span className="text-sm text-gray-500 flex items-center">
               <Globe className="h-4 w-4 mr-1" />
-              {user.country}
+              {(user as User).country}
             </span>
           </div>
           <div className="flex items-center space-x-4">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={handleRefresh}
-              disabled={refreshing}
-            >
+            <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={refreshing}>
               <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
-            <span className="text-sm text-gray-600">Welcome, {user.fullName}</span>
-            {user.role === 'admin' && (
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => navigate('/admin')}
-              >
+            <span className="text-sm text-gray-600">Welcome, {(user as User).fullName}</span>
+            {(user as User).role === 'admin' && (
+              <Button variant="outline" size="sm" onClick={() => navigate('/admin')}>
                 <Settings className="h-4 w-4 mr-2" />
                 Admin Panel
               </Button>
@@ -471,11 +524,11 @@ const Dashboard = () => {
 
       <div className="container mx-auto px-4 py-8">
         {/* Conversion Fee Alert for Polish users */}
-        {user.conversionFeePending && user.country === 'PL' && (
+        {(user as User).conversionFeePending && (user as User).country === 'PL' && (
           <Alert className="mb-6 border-orange-200 bg-orange-50">
             <AlertCircle className="h-4 w-4 text-orange-600" />
             <AlertDescription className="text-orange-800">
-              You have a pending conversion fee of {user.conversionFeeAmount} {user.conversionFeeCurrency}. 
+              You have a pending conversion fee of {(user as User).conversionFeeAmount} {(user as User).conversionFeeCurrency}.
               Please pay this fee via Bybit before making any transfers to other banks.
             </AlertDescription>
           </Alert>
@@ -492,12 +545,11 @@ const Dashboard = () => {
               <CardContent>
                 <div className="text-2xl font-bold">{formatCurrency(balance.balance, balance.currency)}</div>
                 {balance.currency === 'USD' && (
-                  <p className="text-xs text-blue-100">Account: {user.accountNumber}</p>
+                  <p className="text-xs text-blue-100">Account: {(user as User).accountNumber}</p>
                 )}
               </CardContent>
             </Card>
           ))}
-          
           <Card className="bg-gradient-to-r from-purple-600 to-purple-700 text-white">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Assets (USD)</CardTitle>
@@ -519,7 +571,7 @@ const Dashboard = () => {
                 <TabsTrigger value="transactions">Transactions</TabsTrigger>
                 <TabsTrigger value="account">Account Info</TabsTrigger>
               </TabsList>
-              
+
               <TabsContent value="transfer">
                 <Card>
                   <CardHeader>
@@ -535,8 +587,11 @@ const Dashboard = () => {
                     <form onSubmit={handleTransfer} className="space-y-4">
                       <div>
                         <Label htmlFor="currency">Currency</Label>
-                        <Select value={transferData.currency} onValueChange={(value) => setTransferData({ ...transferData, currency: value })}>
-                          <SelectTrigger>
+                        <Select
+                          value={transferData.currency}
+                          onValueChange={(value) => setTransferData({ ...transferData, currency: value })}
+                        >
+                          <SelectTrigger aria-label="Select currency">
                             <SelectValue placeholder="Select currency" />
                           </SelectTrigger>
                           <SelectContent>
@@ -550,8 +605,13 @@ const Dashboard = () => {
                       </div>
                       <div>
                         <Label htmlFor="recipientCountry">Recipient Country</Label>
-                        <Select value={transferData.recipientCountry} onValueChange={(value) => setTransferData({ ...transferData, recipientCountry: value, toAccount: '' })}>
-                          <SelectTrigger>
+                        <Select
+                          value={transferData.recipientCountry}
+                          onValueChange={(value) =>
+                            setTransferData({ ...transferData, recipientCountry: value, toAccount: '' })
+                          }
+                        >
+                          <SelectTrigger aria-label="Select recipient country">
                             <SelectValue placeholder="Select country" />
                           </SelectTrigger>
                           <SelectContent>
@@ -574,10 +634,13 @@ const Dashboard = () => {
                           placeholder={`Enter ${currentAccountFormat?.digits || 10}-digit account number`}
                           maxLength={currentAccountFormat?.digits || 10}
                           value={transferData.toAccount}
-                          onChange={(e) => setTransferData({ ...transferData, toAccount: e.target.value.replace(/\D/g, '') })}
+                          onChange={(e) =>
+                            setTransferData({ ...transferData, toAccount: e.target.value.replace(/\D/g, '') })
+                          }
                           required
+                          aria-describedby="account-format"
                         />
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p id="account-format" className="text-xs text-gray-500 mt-1">
                           {currentAccountFormat?.label || 'Account format'}
                         </p>
                       </div>
@@ -593,7 +656,13 @@ const Dashboard = () => {
                           value={transferData.amount}
                           onChange={(e) => setTransferData({ ...transferData, amount: e.target.value })}
                           required
+                          aria-describedby="amount-error"
                         />
+                        {parseFloat(transferData.amount) > getBalance(transferData.currency) && (
+                          <p id="amount-error" className="text-xs text-red-500 mt-1">
+                            Amount exceeds available balance
+                          </p>
+                        )}
                       </div>
                       <div>
                         <Label htmlFor="description">Description (Optional)</Label>
@@ -605,19 +674,26 @@ const Dashboard = () => {
                           onChange={(e) => setTransferData({ ...transferData, description: e.target.value })}
                         />
                       </div>
-                      <Button 
-                        type="submit" 
+                      <Button
+                        type="submit"
                         className="w-full"
-                        disabled={user.conversionFeePending && user.country === 'PL'}
+                        disabled={
+                          transferLoading ||
+                          ((user as User).conversionFeePending && (user as User).country === 'PL')
+                        }
                       >
-                        <Send className="h-4 w-4 mr-2" />
+                        {transferLoading ? (
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4 mr-2" />
+                        )}
                         Send International Transfer
                       </Button>
                     </form>
                   </CardContent>
                 </Card>
               </TabsContent>
-              
+
               <TabsContent value="transactions">
                 <Card>
                   <CardHeader>
@@ -628,20 +704,31 @@ const Dashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      {transactions.length === 0 ? (
+                      {paginatedTransactions.length === 0 ? (
                         <p className="text-gray-500 text-center py-8">No transactions yet</p>
                       ) : (
-                        transactions.map((transaction) => (
-                          <div key={transaction.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                        paginatedTransactions.map((transaction) => (
+                          <div
+                            key={transaction.id}
+                            className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                          >
                             <div className="flex items-center space-x-3">
-                              <div className={`p-2 rounded-full ${
-                                transaction.transaction_type === 'transfer_sent' ? 'bg-red-100 text-red-600' :
-                                transaction.transaction_type === 'transfer_received' ? 'bg-green-100 text-green-600' :
-                                'bg-blue-100 text-blue-600'
-                              }`}>
-                                {transaction.transaction_type === 'transfer_sent' ? <Send className="h-4 w-4" /> :
-                                 transaction.transaction_type === 'transfer_received' ? <TrendingUp className="h-4 w-4" /> :
-                                 <CreditCard className="h-4 w-4" />}
+                              <div
+                                className={`p-2 rounded-full ${
+                                  transaction.transaction_type === 'transfer_sent'
+                                    ? 'bg-red-100 text-red-600'
+                                    : transaction.transaction_type === 'transfer_received'
+                                    ? 'bg-green-100 text-green-600'
+                                    : 'bg-blue-100 text-blue-600'
+                                }`}
+                              >
+                                {transaction.transaction_type === 'transfer_sent' ? (
+                                  <Send className="h-4 w-4" />
+                                ) : transaction.transaction_type === 'transfer_received' ? (
+                                  <TrendingUp className="h-4 w-4" />
+                                ) : (
+                                  <CreditCard className="h-4 w-4" />
+                                )}
                               </div>
                               <div>
                                 <p className="font-medium">{transaction.description}</p>
@@ -649,17 +736,43 @@ const Dashboard = () => {
                                 <p className="text-xs text-gray-400">Status: {transaction.status}</p>
                               </div>
                             </div>
-                            <div className={`font-bold ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {transaction.amount >= 0 ? '+' : ''}{formatCurrency(transaction.amount, transaction.transaction_currency)}
+                            <div
+                              className={`font-bold ${
+                                transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'
+                              }`}
+                            >
+                              {transaction.amount >= 0 ? '+' : ''}
+                              {formatCurrency(transaction.amount, transaction.transaction_currency)}
                             </div>
                           </div>
                         ))
                       )}
                     </div>
+                    {totalPages > 1 && (
+                      <div className="flex justify-between mt-4">
+                        <Button
+                          variant="outline"
+                          disabled={currentPage === 1}
+                          onClick={() => setCurrentPage((prev) => prev - 1)}
+                        >
+                          Previous
+                        </Button>
+                        <span>
+                          Page {currentPage} of {totalPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          disabled={currentPage === totalPages}
+                          onClick={() => setCurrentPage((prev) => prev + 1)}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>
-              
+
               <TabsContent value="account">
                 <Card>
                   <CardHeader>
@@ -672,27 +785,27 @@ const Dashboard = () => {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <Label className="text-sm font-medium text-gray-500">Account Holder</Label>
-                        <p className="text-lg font-semibold">{user.fullName}</p>
+                        <p className="text-lg font-semibold">{(user as User).fullName}</p>
                       </div>
                       <div>
                         <Label className="text-sm font-medium text-gray-500">Account Number</Label>
-                        <p className="text-lg font-semibold">{user.accountNumber}</p>
+                        <p className="text-lg font-semibold">{(user as User).accountNumber}</p>
                       </div>
                       <div>
                         <Label className="text-sm font-medium text-gray-500">Email</Label>
-                        <p className="text-lg">{user.email}</p>
+                        <p className="text-lg">{(user as User).email}</p>
                       </div>
                       <div>
                         <Label className="text-sm font-medium text-gray-500">Country</Label>
-                        <p className="text-lg">{user.country}</p>
+                        <p className="text-lg">{(user as User).country}</p>
                       </div>
                       <div>
                         <Label className="text-sm font-medium text-gray-500">Account Type</Label>
-                        <p className="text-lg capitalize">{user.role}</p>
+                        <p className="text-lg capitalize">{(user as User).role}</p>
                       </div>
                       <div>
                         <Label className="text-sm font-medium text-gray-500">Active Currencies</Label>
-                        <p className="text-lg">{balances.map(b => b.currency).join(', ')}</p>
+                        <p className="text-lg">{balances.map((b) => b.currency).join(', ')}</p>
                       </div>
                     </div>
                   </CardContent>
@@ -728,18 +841,14 @@ const Dashboard = () => {
                 <CardTitle className="text-lg">Exchange Rates</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>USD/PLN</span>
-                  <span>4.00</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>EUR/USD</span>
-                  <span>1.10</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>GBP/USD</span>
-                  <span>1.30</span>
-                </div>
+                {exchangeRates
+                  .filter((rate) => rate.currency !== 'USD')
+                  .map((rate) => (
+                    <div key={rate.currency} className="flex justify-between text-sm">
+                      <span>USD/{rate.currency}</span>
+                      <span>{rate.rate.toFixed(2)}</span>
+                    </div>
+                  ))}
               </CardContent>
             </Card>
           </div>
