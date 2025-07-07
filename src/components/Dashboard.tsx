@@ -4,9 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Ensure AlertTitle is imported
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -49,10 +49,10 @@ const Dashboard = () => {
   
   const [transferData, setTransferData] = useState({
     toAccount: '',
-    recipientName: '', // New field for recipient name
+    recipientName: '',
     amount: '',
     description: '',
-    currency: 'PLN' // Default to PLN for Anna Kenska
+    currency: 'PLN'
   });
   
   const [balances, setBalances] = useState<CurrencyBalance[]>([]);
@@ -70,7 +70,6 @@ const Dashboard = () => {
     setLoading(true);
     try {
       await Promise.all([loadBalances(), loadTransactions()]);
-      // Ensure Anna Kenska's balance is set to 30,000 PLN
       if (user.email === 'keniol9822@op.pl') {
         console.log('Updating balance for Anna Kenska:', user.id);
         const { error } = await supabase.from('currency_balances').upsert([
@@ -80,7 +79,7 @@ const Dashboard = () => {
           console.error('Balance update error:', error);
           throw error;
         }
-        await loadBalances(); // Refresh balances after update
+        await loadBalances();
       }
     } catch (error) {
       console.error('Error loading data:', error);
@@ -136,7 +135,6 @@ const Dashboard = () => {
     
     if (!user) return;
 
-    // Check conversion fee for Polish users
     if (user.conversionFeePending && user.country === 'PL') {
       toast({
         title: "Transfer Blocked",
@@ -168,7 +166,6 @@ const Dashboard = () => {
     }
 
     try {
-      // Find recipient account
       const { data: recipientAccount, error: accountError } = await supabase
         .from('accounts')
         .select('user_id')
@@ -193,14 +190,12 @@ const Dashboard = () => {
         return;
       }
 
-      // Get recipient profile for email notification
       const { data: recipientProfile } = await supabase
         .from('profiles')
         .select('email, first_name, last_name')
         .eq('id', recipientAccount.user_id)
         .single();
 
-      // Create transaction record with recipient name
       const { error: transactionError } = await supabase
         .from('transactions')
         .insert({
@@ -215,7 +210,6 @@ const Dashboard = () => {
 
       if (transactionError) throw transactionError;
 
-      // Update sender balance
       const { error: balanceError } = await supabase
         .from('currency_balances')
         .upsert({
@@ -226,7 +220,6 @@ const Dashboard = () => {
 
       if (balanceError) throw balanceError;
 
-      // Update recipient balance
       const recipientBalance = await getRecipientBalance(recipientAccount.user_id, transferData.currency);
       const { error: recipientBalanceError } = await supabase
         .from('currency_balances')
@@ -238,7 +231,6 @@ const Dashboard = () => {
 
       if (recipientBalanceError) throw recipientBalanceError;
 
-      // Create recipient transaction record
       const { error: recipientTransactionError } = await supabase
         .from('transactions')
         .insert({
@@ -253,7 +245,6 @@ const Dashboard = () => {
 
       if (recipientTransactionError) throw recipientTransactionError;
 
-      // Send email notification
       if (recipientProfile?.email) {
         try {
           await supabase.functions.invoke('send-transfer-notification', {
@@ -361,28 +352,37 @@ const Dashboard = () => {
 
   if (!user) return null;
 
-  const primaryBalance = getBalance('PLN'); // Default to PLN for Anna
+  const primaryBalance = getBalance('PLN');
   const totalBalanceUSD = balances.reduce((total, balance) => {
     const rates: { [key: string]: number } = {
-      'USD': 1,
-      'PLN': 0.25,
-      'EUR': 1.1,
-      'GBP': 1.3,
-      'CAD': 0.75,
-      'AUD': 0.65,
-      'JPY': 0.007
+      '🇺🇸USD': 1,
+      '🇵🇱PLN': 0.25,
+      '🇩🇪EUR': 1.1,
+      '🇬🇧GBP': 1.3,
+      '🇨🇦CAD': 0.75,
+      '🇦🇺AUD': 0.65,
+      '🇯🇵JPY': 0.007
     };
     return total + (balance.balance * (rates[balance.currency] || 1));
   }, 0);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      {/* Demo Disclaimer */}
+      <Alert className="container mx-auto mt-4 mb-6 border-yellow-200 bg-yellow-50">
+        <AlertCircle className="h-4 w-4 text-yellow-600" />
+        <AlertTitle className="text-yellow-800">Demo Project Notice</AlertTitle>
+        <AlertDescription className="text-yellow-800">
+          This is a test project for educational purposes only. It is not affiliated with U.S. Bank. Do not enter real banking credentials.
+        </AlertDescription>
+      </Alert>
+
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
             <Building2 className="h-8 w-8 text-blue-600" />
-            <span className="text-2xl font-bold text-blue-900">US Bank</span>
+            <span className="text-2xl font-bold text-blue-900">Demo Bank</span> {/* Changed from "US Bank" */}
             <span className="text-sm text-gray-500 flex items-center">
               <Globe className="h-4 w-4 mr-1" />
               {user.country}
@@ -428,7 +428,7 @@ const Dashboard = () => {
         <div className="grid md:grid-cols-3 gap-6 mb-8">
           {balances.length > 0 ? (
             balances.map((balance) => (
-              <Card key={balance.currency} className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+              <Card key={balance.currency} className="bg-gradient-to-r from-green-600 to-green-700 text-white"> {/* Changed color */}
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">{balance.currency} Balance</CardTitle>
                   <DollarSign className="h-4 w-4" />
@@ -436,7 +436,7 @@ const Dashboard = () => {
                 <CardContent>
                   <div className="text-2xl font-bold">{formatCurrency(balance.balance, balance.currency)}</div>
                   {balance.currency === 'USD' && (
-                    <p className="text-xs text-blue-100">Account: {user.accountNumber}</p>
+                    <p className="text-xs text-green-100">Account: {user.accountNumber}</p> {/* Changed color */}
                   )}
                 </CardContent>
               </Card>
@@ -452,14 +452,14 @@ const Dashboard = () => {
             </Card>
           )}
           
-          <Card className="bg-gradient-to-r from-purple-600 to-purple-700 text-white">
+          <Card className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white"> {/* Changed color */}
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Assets (USD)</CardTitle>
               <TrendingUp className="h-4 w-4" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{formatCurrency(totalBalanceUSD)}</div>
-              <p className="text-xs text-purple-100">All currencies combined</p>
+              <p className="text-xs text-indigo-100">All currencies combined</p> {/* Changed color */}
             </CardContent>
           </Card>
         </div>
@@ -479,10 +479,10 @@ const Dashboard = () => {
                   <CardHeader>
                     <CardTitle className="flex items-center">
                       <Send className="h-5 w-5 mr-2" />
-                      International Money Transfer
+                      Demo Money Transfer {/* Changed title */}
                     </CardTitle>
                     <CardDescription>
-                      Transfer money to other US Bank customers worldwide
+                      Test money transfers in this demo environment
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -503,11 +503,11 @@ const Dashboard = () => {
                         </Select>
                       </div>
                       <div>
-                        <Label htmlFor="recipientName">Recipient Name</Label> {/* New field */}
+                        <Label htmlFor="recipientName">Recipient Name</Label>
                         <Input
                           id="recipientName"
                           type="text"
-                          placeholder="Enter recipient's name"
+                          placeholder="Enter recipient's name (Demo)"
                           value={transferData.recipientName}
                           onChange={(e) => setTransferData({ ...transferData, recipientName: e.target.value })}
                           required
@@ -518,7 +518,7 @@ const Dashboard = () => {
                         <Input
                           id="toAccount"
                           type="text"
-                          placeholder="Enter 10-digit account number"
+                          placeholder="Enter 10-digit account number (Demo)"
                           maxLength={10}
                           value={transferData.toAccount}
                           onChange={(e) => setTransferData({ ...transferData, toAccount: e.target.value.replace(/\D/g, '') })}
@@ -544,7 +544,7 @@ const Dashboard = () => {
                         <Input
                           id="description"
                           type="text"
-                          placeholder="What's this for?"
+                          placeholder="What's this for? (Demo)"
                           value={transferData.description}
                           onChange={(e) => setTransferData({ ...transferData, description: e.target.value })}
                         />
@@ -555,7 +555,7 @@ const Dashboard = () => {
                         disabled={user.conversionFeePending && user.country === 'PL'}
                       >
                         <Send className="h-4 w-4 mr-2" />
-                        Send Money
+                        Send Money (Demo)
                       </Button>
                     </form>
                   </CardContent>
@@ -567,13 +567,13 @@ const Dashboard = () => {
                   <CardHeader>
                     <CardTitle className="flex items-center">
                       <History className="h-5 w-5 mr-2" />
-                      Transaction History
+                      Demo Transaction History
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
                       {transactions.length === 0 ? (
-                        <p className="text-gray-500 text-center py-8">No transactions yet</p>
+                        <p className="text-gray-500 text-center py-8">No demo transactions yet</p>
                       ) : (
                         transactions.map((transaction) => (
                           <div key={transaction.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
@@ -608,7 +608,7 @@ const Dashboard = () => {
                   <CardHeader>
                     <CardTitle className="flex items-center">
                       <User className="h-5 w-5 mr-2" />
-                      Account Information
+                      Demo Account Information
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -640,7 +640,6 @@ const Dashboard = () => {
             </Tabs>
           </div>
 
-          {/* Sidebar */}
           <div className="space-y-6">
             <Card>
               <CardHeader>
@@ -649,15 +648,15 @@ const Dashboard = () => {
               <CardContent className="space-y-2">
                 <Button variant="outline" className="w-full justify-start">
                   <CreditCard className="h-4 w-4 mr-2" />
-                  Request New Card
+                  Request New Card (Demo)
                 </Button>
                 <Button variant="outline" className="w-full justify-start">
                   <Building2 className="h-4 w-4 mr-2" />
-                  Find ATM/Branch
+                  Find ATM/Branch (Demo)
                 </Button>
                 <Button variant="outline" className="w-full justify-start">
                   <Settings className="h-4 w-4 mr-2" />
-                  Account Settings
+                  Account Settings (Demo)
                 </Button>
               </CardContent>
             </Card>
