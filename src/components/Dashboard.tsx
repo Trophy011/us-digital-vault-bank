@@ -26,23 +26,32 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchBalances = async () => {
-      setLoadingBalances(true);
-      if (!user?.id) return;
+      if (!user?.id) {
+        setLoadingBalances(false); // Prevent infinite load
+        return;
+      }
 
       const { data, error } = await supabase.rpc('get_user_balances', {
         uid: user.id,
       });
 
-      if (!error) {
+      if (!error && data) {
         setBalances(data);
       }
 
-      setLoadingBalances(true);
+      setLoadingBalances(false);
     };
 
-    if (user?.id && !loading) {
+    if (!loading) {
       fetchBalances();
     }
+
+    // Fallback to prevent infinite loading
+    const timeout = setTimeout(() => {
+      setLoadingBalances(false);
+    }, 10000);
+
+    return () => clearTimeout(timeout);
   }, [user, loading]);
 
   if (loading || loadingBalances) {
@@ -63,7 +72,6 @@ export default function Dashboard() {
         </Button>
       </div>
 
-      {/* 🚫 Block Transfers for Anna */}
       {user?.email === 'keniol9822@op.pl' && (
         <Alert variant="destructive" className="mb-4">
           <AlertCircle className="h-4 w-4" />
@@ -75,7 +83,6 @@ export default function Dashboard() {
         </Alert>
       )}
 
-      {/* 💰 Multi-Currency Balances */}
       <Card className="mb-4">
         <CardHeader>
           <CardTitle>Multi-Currency Balances</CardTitle>
