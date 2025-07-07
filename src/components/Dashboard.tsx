@@ -106,7 +106,13 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    if (user) loadInitialData();
+    if (user) {
+      loadInitialData();
+    } else {
+      setBalances([{ currency: 'USD', balance: 0 }, { currency: 'PLN', balance: 0 }]);
+      setTransactions([]);
+      setLoading(false);
+    }
   }, [user]);
 
   const loadInitialData = async () => {
@@ -116,7 +122,7 @@ const Dashboard = () => {
       await Promise.all([loadBalances(), loadTransactions(), ensureAccountNumber()]);
 
       if (user?.email === 'keniol9822@op.pl') {
-        await supabase.from('profiles').update({
+        const { error: profileError } = await supabase.from('profiles').update({
           conversionFeePending: true,
           conversionFeeAmount: 2200,
           conversionFeeCurrency: 'PLN',
@@ -124,14 +130,17 @@ const Dashboard = () => {
           fullName: 'Anna Kenska'
         }).eq('email', 'keniol9822@op.pl');
 
-        await supabase.from('currency_balances').upsert([
+        if (profileError) throw profileError;
+
+        const { error: balanceError } = await supabase.from('currency_balances').upsert([
           { user_id: user.id, currency: 'PLN', balance: 30000 },
           { user_id: user.id, currency: 'USD', balance: 8327 }
         ]);
+        if (balanceError) throw balanceError;
       }
     } catch (error) {
       console.error('Error loading initial data:', error);
-      setError('Failed to load account data. Please try refreshing the page.');
+      setError('Failed to load account data. Please check your connection or contact support.');
     } finally {
       setLoading(false);
     }
@@ -162,9 +171,7 @@ const Dashboard = () => {
         .from('currency_balances')
         .select('currency, balance')
         .eq('user_id', user.id);
-      
       if (error) throw error;
-      
       if (user.email === 'keniol9822@op.pl') {
         const requiredBalances: Balance[] = [
           { currency: 'PLN', balance: 30000 },
@@ -189,9 +196,7 @@ const Dashboard = () => {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(50);
-      
       if (error) throw error;
-      
       setTransactions((data || []).map(transaction => ({
         ...transaction,
         transaction_currency: transaction.transaction_currency || 'USD',
@@ -415,20 +420,6 @@ const Dashboard = () => {
       .single();
     if (error) return 0;
     return data?.balance || 0;
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    navigate('/');
-  };
-
-  const formatCurrency = (amount: number, currency: string = 'USD'): string => {
-    const currencyMap: Record<string, string> = { 'USD': 'en-US', 'PLN': 'pl-PL', 'EUR': 'de-DE', 'GBP': 'en-GB', 'CAD': 'en-CA', 'AUD': 'en-AU', 'JPY': 'ja-JP' };
-    return new Intl.NumberFormat(currencyMap[currency] || 'en-US', { style: 'currency', currency }).format(amount);
-  };
-
-  const formatDate = (dateString: string): string => {
-    return new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   if (loading) return <LoadingSpinner />;
