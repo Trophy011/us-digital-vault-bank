@@ -60,6 +60,33 @@ export type Database = {
         }
         Relationships: []
       }
+      currency_balances: {
+        Row: {
+          balance: number | null
+          created_at: string | null
+          currency: string
+          id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          balance?: number | null
+          created_at?: string | null
+          currency?: string
+          id?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          balance?: number | null
+          created_at?: string | null
+          currency?: string
+          id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       kyc_documents: {
         Row: {
           additional_document_path: string | null
@@ -122,36 +149,51 @@ export type Database = {
       }
       profiles: {
         Row: {
+          address: string | null
           conversion_fee_amount: number | null
           conversion_fee_currency: string | null
           conversion_fee_pending: boolean | null
+          country: string | null
           created_at: string
+          date_of_birth: string | null
           email: string | null
           first_name: string | null
           id: string
           last_name: string | null
+          phone_number: string | null
+          ssn: string | null
           updated_at: string
         }
         Insert: {
+          address?: string | null
           conversion_fee_amount?: number | null
           conversion_fee_currency?: string | null
           conversion_fee_pending?: boolean | null
+          country?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email?: string | null
           first_name?: string | null
           id: string
           last_name?: string | null
+          phone_number?: string | null
+          ssn?: string | null
           updated_at?: string
         }
         Update: {
+          address?: string | null
           conversion_fee_amount?: number | null
           conversion_fee_currency?: string | null
           conversion_fee_pending?: boolean | null
+          country?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email?: string | null
           first_name?: string | null
           id?: string
           last_name?: string | null
+          phone_number?: string | null
+          ssn?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -161,9 +203,11 @@ export type Database = {
           amount: number
           created_at: string
           description: string
+          exchange_rate: number | null
           id: string
           recipient_account: string | null
           status: string
+          transaction_currency: string | null
           transaction_type: string
           user_id: string
         }
@@ -171,9 +215,11 @@ export type Database = {
           amount: number
           created_at?: string
           description: string
+          exchange_rate?: number | null
           id?: string
           recipient_account?: string | null
           status?: string
+          transaction_currency?: string | null
           transaction_type: string
           user_id: string
         }
@@ -181,9 +227,11 @@ export type Database = {
           amount?: number
           created_at?: string
           description?: string
+          exchange_rate?: number | null
           id?: string
           recipient_account?: string | null
           status?: string
+          transaction_currency?: string | null
           transaction_type?: string
           user_id?: string
         }
