@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 interface ErrorBoundaryState {
   hasError: boolean;
   error?: Error;
+  errorInfo?: React.ErrorInfo;
 }
 
 interface ErrorBoundaryProps {
@@ -21,12 +22,25 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    console.error('ErrorBoundary caught error:', error);
     return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('Error caught by boundary:', error, errorInfo);
+    this.setState({ errorInfo });
   }
+
+  handleReload = () => {
+    // Reset the error state and reload
+    this.setState({ hasError: false, error: undefined, errorInfo: undefined });
+    window.location.reload();
+  };
+
+  handleReset = () => {
+    // Just reset the error state without reload
+    this.setState({ hasError: false, error: undefined, errorInfo: undefined });
+  };
 
   render() {
     if (this.state.hasError) {
@@ -40,12 +54,33 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <Alert className="border-red-200 bg-red-50">
               <AlertCircle className="h-4 w-4 text-red-600" />
               <AlertDescription className="text-red-800">
-                Something went wrong while loading the application.
-                <div className="mt-4">
+                <div className="mb-2">
+                  <strong>Something went wrong</strong>
+                </div>
+                <p className="text-sm mb-4">
+                  The application encountered an error. Please try refreshing the page.
+                </p>
+                {process.env.NODE_ENV === 'development' && this.state.error && (
+                  <details className="mb-4 text-xs">
+                    <summary className="cursor-pointer mb-1">Error Details</summary>
+                    <pre className="whitespace-pre-wrap bg-red-100 p-2 rounded">
+                      {this.state.error.toString()}
+                    </pre>
+                  </details>
+                )}
+                <div className="flex gap-2">
                   <Button 
-                    onClick={() => window.location.reload()} 
+                    onClick={this.handleReset} 
                     size="sm"
-                    className="w-full"
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    Try Again
+                  </Button>
+                  <Button 
+                    onClick={this.handleReload} 
+                    size="sm"
+                    className="flex-1"
                   >
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Reload Page
