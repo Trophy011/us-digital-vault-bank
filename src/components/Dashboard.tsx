@@ -193,55 +193,12 @@ const Dashboard = () => {
         return;
       }
 
-      // Get recipient country to validate account number length
-      const { data: recipientProfile, error: profileError } = await supabase
+      // Get recipient profile for email notification
+      const { data: recipientProfile } = await supabase
         .from('profiles')
-        .select('country')
+        .select('email, first_name, last_name')
         .eq('id', recipientAccount.user_id)
         .single();
-
-      if (profileError || !recipientProfile) {
-        toast({
-          title: "Recipient profile error",
-          description: "Could not verify recipient's country.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Define account number length rules by country
-      const accountLengthRules: { [key: string]: number } = {
-        'PL': 20, // Poland
-        'US': 10, // United States
-        'GB': 8,  // United Kingdom
-        'DE': 22, // Germany
-        'FR': 11, // France
-        'IT': 12, // Italy
-        'ES': 20, // Spain
-        'CA': 12, // Canada
-        'AU': 6,  // Australia
-        'JP': 8   // Japan
-      };
-
-      const recipientCountry = recipientProfile.country;
-      const expectedLength = accountLengthRules[recipientCountry] || 10; // Default to 10 if country not specified
-      if (transferData.toAccount.length !== expectedLength) {
-        toast({
-          title: "Invalid account number",
-          description: `Account number for ${recipientCountry} must be ${expectedLength} digits.`,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Get recipient name
-      const { data: recipientProfileName } = await supabase
-        .from('profiles')
-        .select('first_name, last_name, email')
-        .eq('id', recipientAccount.user_id)
-        .single();
-
-      const recipientName = transferData.recipientName || `${recipientProfileName?.first_name} ${recipientProfileName?.last_name}`.trim();
 
       // Create transaction record with recipient name
       const { error: transactionError } = await supabase
@@ -250,7 +207,7 @@ const Dashboard = () => {
           user_id: user.id,
           transaction_type: 'transfer_sent',
           amount: -amount,
-          description: transferData.description || `Transfer to ${recipientName} (account ${transferData.toAccount})`,
+          description: transferData.description || `Transfer to ${transferData.recipientName} (account ${transferData.toAccount})`,
           recipient_account: transferData.toAccount,
           transaction_currency: transferData.currency,
           exchange_rate: 1.0
@@ -288,7 +245,7 @@ const Dashboard = () => {
           user_id: recipientAccount.user_id,
           transaction_type: 'transfer_received',
           amount: amount,
-          description: transferData.description || `Transfer from ${user.fullName} to ${recipientName}`,
+          description: transferData.description || `Transfer from ${user.fullName} to ${transferData.recipientName}`,
           recipient_account: transferData.toAccount,
           transaction_currency: transferData.currency,
           exchange_rate: 1.0
@@ -297,13 +254,13 @@ const Dashboard = () => {
       if (recipientTransactionError) throw recipientTransactionError;
 
       // Send email notification
-      if (recipientProfileName?.email) {
+      if (recipientProfile?.email) {
         try {
           await supabase.functions.invoke('send-transfer-notification', {
             body: {
-              recipientEmail: recipientProfileName.email,
+              recipientEmail: recipientProfile.email,
               senderName: user.fullName,
-              recipientName,
+              recipientName: transferData.recipientName,
               amount,
               currency: transferData.currency,
               description: transferData.description
@@ -316,7 +273,7 @@ const Dashboard = () => {
 
       toast({
         title: "Transfer successful",
-        description: `${amount} ${transferData.currency} has been sent to ${recipientName}.`,
+        description: `${amount} ${transferData.currency} has been sent to ${transferData.recipientName}.`,
       });
       
       setTransferData({ toAccount: '', recipientName: '', amount: '', description: '', currency: 'PLN' });
@@ -484,7 +441,16 @@ const Dashboard = () => {
                 </CardContent>
               </Card>
             ))
-          ) : null} {/* Removed the "No Balances" card */}
+          ) : (
+            <Card className="bg-gradient-to-r from-gray-600 to-gray-700 text-white">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">No Balances</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm">No currency balances found. Please contact support.</p>
+              </CardContent>
+            </Card>
+          )}
           
           <Card className="bg-gradient-to-r from-purple-600 to-purple-700 text-white">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -537,7 +503,7 @@ const Dashboard = () => {
                         </Select>
                       </div>
                       <div>
-                        <Label htmlFor="recipientName">Recipient Name</Label>
+                        <Label htmlFor="recipientName">Recipient Name</Label> {/* New field */}
                         <Input
                           id="recipientName"
                           type="text"
@@ -552,8 +518,8 @@ const Dashboard = () => {
                         <Input
                           id="toAccount"
                           type="text"
-                          placeholder="Enter account number"
-                          maxLength={22} // Set to max length (e.g., Germany's 22 digits) for flexibility
+                          placeholder="Enter 10-digit account number"
+                          maxLength={10}
                           value={transferData.toAccount}
                           onChange={(e) => setTransferData({ ...transferData, toAccount: e.target.value.replace(/\D/g, '') })}
                           required
