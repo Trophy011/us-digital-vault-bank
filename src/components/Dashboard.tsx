@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Ensure AlertTitle is imported
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -355,20 +355,19 @@ const Dashboard = () => {
   const primaryBalance = getBalance('PLN');
   const totalBalanceUSD = balances.reduce((total, balance) => {
     const rates: { [key: string]: number } = {
-      '🇺🇸USD': 1,
-      '🇵🇱PLN': 0.25,
-      '🇩🇪EUR': 1.1,
-      '🇬🇧GBP': 1.3,
-      '🇨🇦CAD': 0.75,
-      '🇦🇺AUD': 0.65,
-      '🇯🇵JPY': 0.007
+      'USD': 1,
+      'PLN': 0.25,
+      'EUR': 1.1,
+      'GBP': 1.3,
+      'CAD': 0.75,
+      'AUD': 0.65,
+      'JPY': 0.007
     };
     return total + (balance.balance * (rates[balance.currency] || 1));
   }, 0);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      {/* Demo Disclaimer */}
       <Alert className="container mx-auto mt-4 mb-6 border-yellow-200 bg-yellow-50">
         <AlertCircle className="h-4 w-4 text-yellow-600" />
         <AlertTitle className="text-yellow-800">Demo Project Notice</AlertTitle>
@@ -377,12 +376,11 @@ const Dashboard = () => {
         </AlertDescription>
       </Alert>
 
-      {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <Building2 className="h-8 w-8 text-blue-600" />
-            <span className="text-2xl font-bold text-blue-900">Demo Bank</span> {/* Changed from "US Bank" */}
+            <Building2 className="h-8 w-8 text-[var(--primary)]" />
+            <span className="text-2xl font-bold text-[var(--primary)]">Demo Bank</span>
             <span className="text-sm text-gray-500 flex items-center">
               <Globe className="h-4 w-4 mr-1" />
               {user.country}
@@ -413,7 +411,6 @@ const Dashboard = () => {
       </header>
 
       <div className="container mx-auto px-4 py-8">
-        {/* Conversion Fee Alert for Polish users */}
         {user.conversionFeePending && user.country === 'PL' && (
           <Alert className="mb-6 border-orange-200 bg-orange-50">
             <AlertCircle className="h-4 w-4 text-orange-600" />
@@ -424,11 +421,10 @@ const Dashboard = () => {
           </Alert>
         )}
 
-        {/* Account Overview */}
         <div className="grid md:grid-cols-3 gap-6 mb-8">
           {balances.length > 0 ? (
             balances.map((balance) => (
-              <Card key={balance.currency} className="bg-gradient-to-r from-green-600 to-green-700 text-white"> {/* Changed color */}
+              <Card key={balance.currency} className="bg-gradient-to-r from-[var(--primary)] to-green-700 text-white">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">{balance.currency} Balance</CardTitle>
                   <DollarSign className="h-4 w-4" />
@@ -436,7 +432,7 @@ const Dashboard = () => {
                 <CardContent>
                   <div className="text-2xl font-bold">{formatCurrency(balance.balance, balance.currency)}</div>
                   {balance.currency === 'USD' && (
-                    <p className="text-xs text-green-100">Account: {user.accountNumber}</p> {/* Changed color */}
+                    <p className="text-xs text-green-100">Account: {user.accountNumber}</p>
                   )}
                 </CardContent>
               </Card>
@@ -452,19 +448,18 @@ const Dashboard = () => {
             </Card>
           )}
           
-          <Card className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white"> {/* Changed color */}
+          <Card className="bg-gradient-to-r from-[var(--secondary)] to-indigo-700 text-white">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Assets (USD)</CardTitle>
               <TrendingUp className="h-4 w-4" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{formatCurrency(totalBalanceUSD)}</div>
-              <p className="text-xs text-indigo-100">All currencies combined</p> {/* Changed color */}
+              <p className="text-xs text-indigo-100">All currencies combined</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Main Content */}
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
             <Tabs defaultValue="transfer" className="w-full">
@@ -479,7 +474,7 @@ const Dashboard = () => {
                   <CardHeader>
                     <CardTitle className="flex items-center">
                       <Send className="h-5 w-5 mr-2" />
-                      Demo Money Transfer {/* Changed title */}
+                      Demo Money Transfer
                     </CardTitle>
                     <CardDescription>
                       Test money transfers in this demo environment
@@ -581,7 +576,7 @@ const Dashboard = () => {
                               <div className={`p-2 rounded-full ${
                                 transaction.transaction_type === 'transfer_sent' ? 'bg-red-100 text-red-600' :
                                 transaction.transaction_type === 'transfer_received' ? 'bg-green-100 text-green-600' :
-                                'bg-blue-100 text-blue-600'
+                                'bg-[var(--primary)] text-white'
                               }`}>
                                 {transaction.transaction_type === 'transfer_sent' ? <Send className="h-4 w-4" /> :
                                  transaction.transaction_type === 'transfer_received' ? <TrendingUp className="h-4 w-4" /> :
