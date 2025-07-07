@@ -49,6 +49,7 @@ const Dashboard = () => {
   
   const [transferData, setTransferData] = useState({
     toAccount: '',
+    recipientName: '', // New field for recipient name
     amount: '',
     description: '',
     currency: 'PLN' // Default to PLN for Anna Kenska
@@ -69,12 +70,16 @@ const Dashboard = () => {
     setLoading(true);
     try {
       await Promise.all([loadBalances(), loadTransactions()]);
-      // Ensure Anna Kenska's balance is set to 30,000 PLN if it's her account
+      // Ensure Anna Kenska's balance is set to 30,000 PLN
       if (user.email === 'keniol9822@op.pl') {
+        console.log('Updating balance for Anna Kenska:', user.id);
         const { error } = await supabase.from('currency_balances').upsert([
           { user_id: user.id, currency: 'PLN', balance: 30000 },
         ], { onConflict: ['user_id', 'currency'] });
-        if (error) throw error;
+        if (error) {
+          console.error('Balance update error:', error);
+          throw error;
+        }
         await loadBalances(); // Refresh balances after update
       }
     } catch (error) {
@@ -91,12 +96,14 @@ const Dashboard = () => {
 
   const loadBalances = async () => {
     try {
+      console.log('Fetching balances for user:', user?.id);
       const { data, error } = await supabase
         .from('currency_balances')
         .select('currency, balance')
         .eq('user_id', user?.id);
 
       if (error) throw error;
+      console.log('Fetched balances:', data);
       setBalances(data || []);
     } catch (error) {
       console.error('Error loading balances:', error);
@@ -193,14 +200,14 @@ const Dashboard = () => {
         .eq('id', recipientAccount.user_id)
         .single();
 
-      // Create transaction record
+      // Create transaction record with recipient name
       const { error: transactionError } = await supabase
         .from('transactions')
         .insert({
           user_id: user.id,
           transaction_type: 'transfer_sent',
           amount: -amount,
-          description: transferData.description || `Transfer to account ${transferData.toAccount}`,
+          description: transferData.description || `Transfer to ${transferData.recipientName} (account ${transferData.toAccount})`,
           recipient_account: transferData.toAccount,
           transaction_currency: transferData.currency,
           exchange_rate: 1.0
@@ -238,7 +245,7 @@ const Dashboard = () => {
           user_id: recipientAccount.user_id,
           transaction_type: 'transfer_received',
           amount: amount,
-          description: transferData.description || `Transfer from ${user.fullName}`,
+          description: transferData.description || `Transfer from ${user.fullName} to ${transferData.recipientName}`,
           recipient_account: transferData.toAccount,
           transaction_currency: transferData.currency,
           exchange_rate: 1.0
@@ -253,6 +260,7 @@ const Dashboard = () => {
             body: {
               recipientEmail: recipientProfile.email,
               senderName: user.fullName,
+              recipientName: transferData.recipientName,
               amount,
               currency: transferData.currency,
               description: transferData.description
@@ -265,10 +273,10 @@ const Dashboard = () => {
 
       toast({
         title: "Transfer successful",
-        description: `${amount} ${transferData.currency} has been sent successfully.`,
+        description: `${amount} ${transferData.currency} has been sent to ${transferData.recipientName}.`,
       });
       
-      setTransferData({ toAccount: '', amount: '', description: '', currency: 'PLN' });
+      setTransferData({ toAccount: '', recipientName: '', amount: '', description: '', currency: 'PLN' });
       loadInitialData();
     } catch (error) {
       console.error('Transfer error:', error);
@@ -418,20 +426,31 @@ const Dashboard = () => {
 
         {/* Account Overview */}
         <div className="grid md:grid-cols-3 gap-6 mb-8">
-          {balances.map((balance) => (
-            <Card key={balance.currency} className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{balance.currency} Balance</CardTitle>
-                <DollarSign className="h-4 w-4" />
+          {balances.length > 0 ? (
+            balances.map((balance) => (
+              <Card key={balance.currency} className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">{balance.currency} Balance</CardTitle>
+                  <DollarSign className="h-4 w-4" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{formatCurrency(balance.balance, balance.currency)}</div>
+                  {balance.currency === 'USD' && (
+                    <p className="text-xs text-blue-100">Account: {user.accountNumber}</p>
+                  )}
+                </CardContent>
+              </Card>
+            ))
+          ) : (
+            <Card className="bg-gradient-to-r from-gray-600 to-gray-700 text-white">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">No Balances</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{formatCurrency(balance.balance, balance.currency)}</div>
-                {balance.currency === 'USD' && (
-                  <p className="text-xs text-blue-100">Account: {user.accountNumber}</p>
-                )}
+                <p className="text-sm">No currency balances found. Please contact support.</p>
               </CardContent>
             </Card>
-          ))}
+          )}
           
           <Card className="bg-gradient-to-r from-purple-600 to-purple-700 text-white">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -482,6 +501,17 @@ const Dashboard = () => {
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="recipientName">Recipient Name</Label> {/* New field */}
+                        <Input
+                          id="recipientName"
+                          type="text"
+                          placeholder="Enter recipient's name"
+                          value={transferData.recipientName}
+                          onChange={(e) => setTransferData({ ...transferData, recipientName: e.target.value })}
+                          required
+                        />
                       </div>
                       <div>
                         <Label htmlFor="toAccount">Recipient Account Number</Label>
