@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -38,7 +37,7 @@ export default function Dashboard() {
         setBalances(data);
       }
 
-      setLoadingBalances(false);
+      setLoadingBalances(true);
     };
 
     if (user?.id && !loading) {
