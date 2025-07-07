@@ -1,5 +1,9 @@
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import LandingPage from '@/components/LandingPage';
 import AuthPage from '@/components/AuthPage';
 import Dashboard from '@/components/Dashboard';
@@ -8,10 +12,32 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useAuth } from '@/hooks/useAuth';
 
-const Index = () => {
-  const { user, isAuthenticated, loading } = useAuth();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 2,
+      staleTime: 5 * 60 * 1000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
-  console.log('Index render - loading:', loading, 'isAuthenticated:', isAuthenticated);
+const Index = () => {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <ErrorBoundary>
+          <AppContent />
+        </ErrorBoundary>
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
+};
+
+const AppContent = () => {
+  const { user, isAuthenticated, loading } = useAuth();
 
   if (loading) {
     return <LoadingSpinner message="Loading your account..." />;
