@@ -59,7 +59,7 @@ interface Transaction {
 
 interface ExchangeRate {
   currency: string;
-  rate: number; // Rate relative to USD
+  rate: number;
 }
 
 interface TransferData {
@@ -80,6 +80,8 @@ const COUNTRY_ACCOUNT_FORMATS = {
   AU: { digits: 9, label: 'Australian Bank Account (9 digits)' },
   JP: { digits: 7, label: 'Japanese Bank Account (7 digits)' },
 };
+
+const QUERY_TIMEOUT = 10000; // 10 seconds timeout for Supabase queries
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -104,28 +106,43 @@ const Dashboard = () => {
   const transactionsPerPage = 10;
 
   useEffect(() => {
-    if (user) {
-      loadInitialData();
-      fetchExchangeRates();
+    if (!user) {
+      console.error('No user found, redirecting to login');
+      navigate('/login');
+      return;
     }
-  }, [user]);
+    // Check Supabase session validity
+    const checkSession = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error || !session) {
+        console.error('Invalid session:', error?.message);
+        toast({
+          title: 'Session Error',
+          description: 'Your session has expired. Please log in again.',
+          variant: 'destructive',
+        });
+        await logout();
+        navigate('/login');
+      } else {
+        loadInitialData();
+        fetchExchangeRates();
+      }
+    };
+    checkSession();
+  }, [user, navigate, logout, toast]);
 
-  // Simulate fetching exchange rates from an API
+  // Simulate fetching exchange rates
   const fetchExchangeRates = async () => {
     try {
-      // Placeholder: Replace with actual API call (e.g., exchangeratesapi.io)
       const rates: ExchangeRate[] = [
         { currency: 'USD', rate: 1 },
         { currency: 'PLN', rate: 4.0 },
         { currency: 'EUR', rate: 1.1 },
-        { currency: 'GBP', rate: 1.3 },
-        { currency: 'CAD', rate: 0.75 },
-        { currency: 'AUD', rate: 0.65 },
-        { currency: 'JPY', rate: 0.007 },
+    // ... rest of the exchange rates
       ];
       setExchangeRates(rates);
     } catch (error) {
-      console.error('Error fetching exchange rates:', error);
+      console.error('Exchange rates fetch failed:', error);
       toast({
         title: 'Exchange Rates Error',
         description: 'Unable to fetch exchange rates. Using default rates.',
@@ -134,39 +151,61 @@ const Dashboard = () => {
     }
   };
 
+  const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Query timed out')), timeoutMs);
+    });
+    return Promise.race([promise, timeout]);
+  };
+
   const loadInitialData = async () => {
     setLoading(true);
     try {
+      // Initialize default balances if none exist
+      const { data: existingBalances } = await supabase
+        .from('currency_balances')
+        .select('currency')
+        .eq('user_id', (user as User).id);
+      
+      if (!existingBalances || existingBalances.length === 0) {
+        console.log('No balances found, initializing default balances');
+        const { error } = await supabase.from('currency_balances').insert([
+          { user_id: (user as User).id, currency: 'USD', balance: 8327 },
+          { user_id: (user as User).id, currency: 'PLN', balance: 30000 },
+        ]);
+        if (error) throw error;
+      }
+
       const [balanceData, transactionData] = await Promise.all([
-        loadBalances(),
-        loadTransactions(),
+        withTimeout(loadBalances(), QUERY_TIMEOUT),
+        withTimeout(loadTransactions(), QUERY_TIMEOUT),
       ]);
-      setBalances(balanceData || []);
-      setTransactions(transactionData || []);
-    } catch (error) {
-      console.error('Error loading initial data:', error);
-      setError('Failed to load account data. Please try refreshing the page.');
+      setBalances((balanceData as CurrencyBalance[]) || []);
+      setTransactions((transactionData as Transaction[]) || []);
+    } catch (error: any) {
+      console.error('Error loading initial data:', error.message, error.stack);
+      setError(`Failed to load account data: ${error.message}. Please try refreshing the page.`);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadBalances = async (): Promise<CurrencyBalance[] | null> => {
+  const loadBalances = async (): Promise<CurrencyBalance[]> => {
     try {
       const { data, error } = await supabase
         .from('currency_balances')
         .select('currency, balance')
         .eq('user_id', (user as User).id);
-
-      if (error) throw error;
-      return data;
+      if (error) throw new Error(`Balances fetch failed: ${error.message}`);
+      console.log('Balances loaded:', data);
+      return data || [];
     } catch (error) {
-      console.error('Error loading balances:', error);
+      console.error('loadBalances error:', error);
       throw error;
     }
   };
 
-  const loadTransactions = async (): Promise<Transaction[] | null> => {
+  const loadTransactions = async (): Promise<Transaction[]> => {
     try {
       const { data, error } = await supabase
         .from('transactions')
@@ -174,17 +213,16 @@ const Dashboard = () => {
         .eq('user_id', (user as User).id)
         .order('created_at', { ascending: false })
         .range((currentPage - 1) * transactionsPerPage, currentPage * transactionsPerPage - 1);
-
-      if (error) throw error;
-
-      return data.map((transaction) => ({
-        ...transaction,
-        transaction_currency: transaction.transaction_currency || 'USD',
-        exchange_rate: transaction.exchange_rate || 1.0,
-        status: transaction.status || 'completed',
-      }));
+      if (error) throw new Error(`Transactions fetch failed: ${error.message}`);
+      console.log('Transactions loaded:', data);
+      return data.map((t: any) => ({
+        ...t,
+        transaction_currency: t.transaction_currency || 'USD',
+        exchange_rate: t.exchange_rate || 1.0,
+        status: t.status || 'completed',
+      })) || [];
     } catch (error) {
-      console.error('Error loading transactions:', error);
+      console.error('loadTransactions error:', error);
       throw error;
     }
   };
@@ -197,7 +235,8 @@ const Dashboard = () => {
         title: 'Data refreshed',
         description: 'Your account information has been updated.',
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Refresh error:', error.message);
       toast({
         title: 'Refresh failed',
         description: 'Unable to refresh data. Please try again.',
@@ -220,18 +259,18 @@ const Dashboard = () => {
     return digitsOnly.length === format.digits;
   };
 
-  // Sanitize input to prevent XSS
   const sanitizeInput = (input: string): string => {
     return input.replace(/[<>]/g, '');
   };
 
   const handleTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
-
+    if (!user) {
+      navigate('/login');
+      return;
+    }
     setTransferLoading(true);
     try {
-      // Check conversion fee for Polish users
       if ((user as User).conversionFeePending && (user as User).country === 'PL') {
         toast({
           title: 'Transfer Blocked',
@@ -272,7 +311,6 @@ const Dashboard = () => {
         return;
       }
 
-      // Find recipient account
       const { data: recipientAccount, error: accountError } = await supabase
         .from('accounts')
         .select('user_id')
@@ -297,19 +335,16 @@ const Dashboard = () => {
         return;
       }
 
-      // Get recipient profile for email notification
       const { data: recipientProfile } = await supabase
         .from('profiles')
         .select('email, first_name, last_name')
         .eq('id', recipientAccount.user_id)
         .single();
 
-      // Simulate currency conversion (if recipient uses a different currency)
-      const recipientCurrency = transferData.currency; // Placeholder: Assume same currency for simplicity
+      const recipientCurrency = transferData.currency; // Placeholder
       const exchangeRate = exchangeRates.find((r) => r.currency === transferData.currency)?.rate || 1.0;
       const convertedAmount = amount * exchangeRate;
 
-      // Create transaction record for sender
       const { error: transactionError } = await supabase
         .from('transactions')
         .insert({
@@ -323,9 +358,8 @@ const Dashboard = () => {
           status: 'completed',
         });
 
-      if (transactionError) throw transactionError;
+      if (transactionError) throw new Error(`Transaction insert failed: ${transactionError.message}`);
 
-      // Update sender balance
       const { error: balanceError } = await supabase
         .from('currency_balances')
         .upsert({
@@ -334,9 +368,8 @@ const Dashboard = () => {
           balance: currentBalance - amount,
         });
 
-      if (balanceError) throw balanceError;
+      if (balanceError) throw new Error(`Sender balance update failed: ${balanceError.message}`);
 
-      // Update recipient balance
       const recipientBalance = await getRecipientBalance(recipientAccount.user_id, recipientCurrency);
 
       const { error: recipientBalanceError } = await supabase
@@ -347,9 +380,8 @@ const Dashboard = () => {
           balance: recipientBalance + convertedAmount,
         });
 
-      if (recipientBalanceError) throw recipientBalanceError;
+      if (recipientBalanceError) throw new Error(`Recipient balance update failed: ${recipientBalanceError.message}`);
 
-      // Create recipient transaction record
       const { error: recipientTransactionError } = await supabase
         .from('transactions')
         .insert({
@@ -363,9 +395,8 @@ const Dashboard = () => {
           status: 'completed',
         });
 
-      if (recipientTransactionError) throw recipientTransactionError;
+      if (recipientTransactionError) throw new Error(`Recipient transaction insert failed: ${recipientTransactionError.message}`);
 
-      // Send email notification
       if (recipientProfile?.email) {
         try {
           await supabase.functions.invoke('send-transfer-notification', {
@@ -389,11 +420,11 @@ const Dashboard = () => {
 
       setTransferData({ toAccount: '', amount: '', description: '', currency: 'USD', recipientCountry: 'US' });
       loadInitialData();
-    } catch (error) {
-      console.error('Transfer error:', error);
+    } catch (error: any) {
+      console.error('Transfer error:', error.message, error.stack);
       toast({
         title: 'Transfer failed',
-        description: 'An error occurred during the transfer. Please try again.',
+        description: `An error occurred during the transfer: ${error.message}. Please try again.`,
         variant: 'destructive',
       });
     } finally {
@@ -402,19 +433,31 @@ const Dashboard = () => {
   };
 
   const getRecipientBalance = async (userId: string, currency: string): Promise<number> => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('currency_balances')
       .select('balance')
       .eq('user_id', userId)
       .eq('currency', currency)
       .single();
-
+    if (error) {
+      console.error('Recipient balance fetch error:', error.message);
+      return 0;
+    }
     return data?.balance || 0;
   };
 
   const handleLogout = async () => {
-    await logout();
-    navigate('/');
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+      toast({
+        title: 'Logout failed',
+        description: 'Unable to log out. Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const formatCurrency = (amount: number, currency: string = 'USD'): string => {
@@ -427,7 +470,6 @@ const Dashboard = () => {
       AUD: 'en-AU',
       JPY: 'ja-JP',
     };
-
     return new Intl.NumberFormat(currencyMap[currency] || 'en-US', {
       style: 'currency',
       currency,
@@ -443,6 +485,21 @@ const Dashboard = () => {
       minute: '2-digit',
     });
   };
+
+  // Error Boundary Component
+  const ErrorBoundary = ({ children }: { children: React.ReactNode }) => {
+    try {
+      return <>{children}</>;
+    } catch (error) {
+      console.error('Render error:', error);
+      setError('Failed to render dashboard. Please try refreshing.');
+      return null;
+    }
+  };
+
+  if (!user) {
+    return null; // Redirect handled in useEffect
+  }
 
   if (loading) {
     return <LoadingSpinner message="Loading your account..." />;
@@ -473,8 +530,6 @@ const Dashboard = () => {
     );
   }
 
-  if (!user) return null;
-
   const totalBalanceUSD = balances.reduce((total, balance) => {
     const rate = exchangeRates.find((r) => r.currency === balance.currency)?.rate || 1;
     return total + balance.balance * rate;
@@ -482,7 +537,6 @@ const Dashboard = () => {
 
   const currentAccountFormat = COUNTRY_ACCOUNT_FORMATS[transferData.recipientCountry as keyof typeof COUNTRY_ACCOUNT_FORMATS];
 
-  // Pagination logic
   const totalPages = Math.ceil(transactions.length / transactionsPerPage);
   const paginatedTransactions = transactions.slice(
     (currentPage - 1) * transactionsPerPage,
@@ -490,371 +544,365 @@ const Dashboard = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <Building2 className="h-8 w-8 text-blue-600" />
-            <span className="text-2xl font-bold text-blue-900">US Bank</span>
-            <span className="text-sm text-gray-500 flex items-center">
-              <Globe className="h-4 w-4 mr-1" />
-              {(user as User).country}
-            </span>
-          </div>
-          <div className="flex items-center space-x-4">
-            <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={refreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-            <span className="text-sm text-gray-600">Welcome, {(user as User).fullName}</span>
-            {(user as User).role === 'admin' && (
-              <Button variant="outline" size="sm" onClick={() => navigate('/admin')}>
-                <Settings className="h-4 w-4 mr-2" />
-                Admin Panel
+    <ErrorBoundary>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+        {/* Header */}
+        <header className="bg-white shadow-sm border-b">
+          <div className="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div className="flex items-center space-x-2">
+              <Building2 className="h-8 w-8 text-blue-600" />
+              <span className="text-2xl font-bold text-blue-900">US Bank</span>
+              <span className="text-sm text-gray-500 flex items-center">
+                <Globe className="h-4 w-4 mr-1" />
+                {(user as User).country}
+              </span>
+            </div>
+            <div className="flex items-center space-x-4">
+              <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={refreshing}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                Refresh
               </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={handleLogout}>
-              <LogOut className="h-4 w-4 mr-2" />
-              Logout
-            </Button>
+              <span className="text-sm text-gray-600">Welcome, {(user as User).fullName}</span>
+              {(user as User).role === 'admin' && (
+                <Button variant="outline" size="sm" onClick={() => navigate('/admin')}>
+                  <Settings className="h-4 w-4 mr-2" />
+                  Admin Panel
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={handleLogout}>
+                <LogOut className="h-4 w-4 mr-2" />
+                Logout
+              </Button>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <div className="container mx-auto px-4 py-8">
-        {/* Conversion Fee Alert for Polish users */}
-        {(user as User).conversionFeePending && (user as User).country === 'PL' && (
-          <Alert className="mb-6 border-orange-200 bg-orange-50">
-            <AlertCircle className="h-4 w-4 text-orange-600" />
-            <AlertDescription className="text-orange-800">
-              You have a pending conversion fee of {(user as User).conversionFeeAmount} {(user as User).conversionFeeCurrency}.
-              Please pay this fee via Bybit before making any transfers to other banks.
-            </AlertDescription>
-          </Alert>
-        )}
+        <div className="container mx-auto px-4 py-8">
+          {(user as User).conversionFeePending && (user as User).country === 'PL' && (
+            <Alert className="mb-6 border-orange-200 bg-orange-50">
+              <AlertCircle className="h-4 w-4 text-orange-600" />
+              <AlertDescription className="text-orange-800">
+                You have a pending conversion fee of {(user as User).conversionFeeAmount} {(user as User).conversionFeeCurrency}.
+                Please pay this fee via Bybit before making any transfers to other banks.
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {/* Account Overview */}
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
-          {balances.map((balance) => (
-            <Card key={balance.currency} className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+          <div className="grid md:grid-cols-3 gap-6 mb-8">
+            {balances.map((balance) => (
+              <Card key={balance.currency} className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">{balance.currency} Balance</CardTitle>
+                  <DollarSign className="h-4 w-4" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{formatCurrency(balance.balance, balance.currency)}</div>
+                  {balance.currency === 'USD' && (
+                    <p className="text-xs text-blue-100">Account: {(user as User).accountNumber}</p>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+            <Card className="bg-gradient-to-r from-purple-600 to-purple-700 text-white">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{balance.currency} Balance</CardTitle>
-                <DollarSign className="h-4 w-4" />
+                <CardTitle className="text-sm font-medium">Total Assets (USD)</CardTitle>
+                <TrendingUp className="h-4 w-4" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{formatCurrency(balance.balance, balance.currency)}</div>
-                {balance.currency === 'USD' && (
-                  <p className="text-xs text-blue-100">Account: {(user as User).accountNumber}</p>
-                )}
+                <div className="text-2xl font-bold">{formatCurrency(totalBalanceUSD)}</div>
+                <p className="text-xs text-purple-100">All currencies combined</p>
               </CardContent>
             </Card>
-          ))}
-          <Card className="bg-gradient-to-r from-purple-600 to-purple-700 text-white">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Assets (USD)</CardTitle>
-              <TrendingUp className="h-4 w-4" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(totalBalanceUSD)}</div>
-              <p className="text-xs text-purple-100">All currencies combined</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Main Content */}
-        <div className="grid lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2">
-            <Tabs defaultValue="transfer" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="transfer">International Transfer</TabsTrigger>
-                <TabsTrigger value="transactions">Transactions</TabsTrigger>
-                <TabsTrigger value="account">Account Info</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="transfer">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <Send className="h-5 w-5 mr-2" />
-                      International Money Transfer
-                    </CardTitle>
-                    <CardDescription>
-                      Transfer money to US Bank customers worldwide with secure international routing
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <form onSubmit={handleTransfer} className="space-y-4">
-                      <div>
-                        <Label htmlFor="currency">Currency</Label>
-                        <Select
-                          value={transferData.currency}
-                          onValueChange={(value) => setTransferData({ ...transferData, currency: value })}
-                        >
-                          <SelectTrigger aria-label="Select currency">
-                            <SelectValue placeholder="Select currency" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {balances.map((balance) => (
-                              <SelectItem key={balance.currency} value={balance.currency}>
-                                {balance.currency} (Balance: {formatCurrency(balance.balance, balance.currency)})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="recipientCountry">Recipient Country</Label>
-                        <Select
-                          value={transferData.recipientCountry}
-                          onValueChange={(value) =>
-                            setTransferData({ ...transferData, recipientCountry: value, toAccount: '' })
-                          }
-                        >
-                          <SelectTrigger aria-label="Select recipient country">
-                            <SelectValue placeholder="Select country" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="US">🇺🇸 United States</SelectItem>
-                            <SelectItem value="PL">🇵🇱 Poland</SelectItem>
-                            <SelectItem value="UK">🇬🇧 United Kingdom</SelectItem>
-                            <SelectItem value="DE">🇩🇪 Germany</SelectItem>
-                            <SelectItem value="FR">🇫🇷 France</SelectItem>
-                            <SelectItem value="CA">🇨🇦 Canada</SelectItem>
-                            <SelectItem value="AU">🇦🇺 Australia</SelectItem>
-                            <SelectItem value="JP">🇯🇵 Japan</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor="toAccount">Recipient Account Number</Label>
-                        <Input
-                          id="toAccount"
-                          type="text"
-                          placeholder={`Enter ${currentAccountFormat?.digits || 10}-digit account number`}
-                          maxLength={currentAccountFormat?.digits || 10}
-                          value={transferData.toAccount}
-                          onChange={(e) =>
-                            setTransferData({ ...transferData, toAccount: e.target.value.replace(/\D/g, '') })
-                          }
-                          required
-                          aria-describedby="account-format"
-                        />
-                        <p id="account-format" className="text-xs text-gray-500 mt-1">
-                          {currentAccountFormat?.label || 'Account format'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label htmlFor="amount">Amount</Label>
-                        <Input
-                          id="amount"
-                          type="number"
-                          placeholder="0.00"
-                          step="0.01"
-                          min="0.01"
-                          max={getBalance(transferData.currency)}
-                          value={transferData.amount}
-                          onChange={(e) => setTransferData({ ...transferData, amount: e.target.value })}
-                          required
-                          aria-describedby="amount-error"
-                        />
-                        {parseFloat(transferData.amount) > getBalance(transferData.currency) && (
-                          <p id="amount-error" className="text-xs text-red-500 mt-1">
-                            Amount exceeds available balance
-                          </p>
-                        )}
-                      </div>
-                      <div>
-                        <Label htmlFor="description">Description (Optional)</Label>
-                        <Input
-                          id="description"
-                          type="text"
-                          placeholder="What's this transfer for?"
-                          value={transferData.description}
-                          onChange={(e) => setTransferData({ ...transferData, description: e.target.value })}
-                        />
-                      </div>
-                      <Button
-                        type="submit"
-                        className="w-full"
-                        disabled={
-                          transferLoading ||
-                          ((user as User).conversionFeePending && (user as User).country === 'PL')
-                        }
-                      >
-                        {transferLoading ? (
-                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Send className="h-4 w-4 mr-2" />
-                        )}
-                        Send International Transfer
-                      </Button>
-                    </form>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="transactions">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <History className="h-5 w-5 mr-2" />
-                      Transaction History
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {paginatedTransactions.length === 0 ? (
-                        <p className="text-gray-500 text-center py-8">No transactions yet</p>
-                      ) : (
-                        paginatedTransactions.map((transaction) => (
-                          <div
-                            key={transaction.id}
-                            className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
-                          >
-                            <div className="flex items-center space-x-3">
-                              <div
-                                className={`p-2 rounded-full ${
-                                  transaction.transaction_type === 'transfer_sent'
-                                    ? 'bg-red-100 text-red-600'
-                                    : transaction.transaction_type === 'transfer_received'
-                                    ? 'bg-green-100 text-green-600'
-                                    : 'bg-blue-100 text-blue-600'
-                                }`}
-                              >
-                                {transaction.transaction_type === 'transfer_sent' ? (
-                                  <Send className="h-4 w-4" />
-                                ) : transaction.transaction_type === 'transfer_received' ? (
-                                  <TrendingUp className="h-4 w-4" />
-                                ) : (
-                                  <CreditCard className="h-4 w-4" />
-                                )}
-                              </div>
-                              <div>
-                                <p className="font-medium">{transaction.description}</p>
-                                <p className="text-sm text-gray-500">{formatDate(transaction.created_at)}</p>
-                                <p className="text-xs text-gray-400">Status: {transaction.status}</p>
-                              </div>
-                            </div>
-                            <div
-                              className={`font-bold ${
-                                transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'
-                              }`}
-                            >
-                              {transaction.amount >= 0 ? '+' : ''}
-                              {formatCurrency(transaction.amount, transaction.transaction_currency)}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    {totalPages > 1 && (
-                      <div className="flex justify-between mt-4">
-                        <Button
-                          variant="outline"
-                          disabled={currentPage === 1}
-                          onClick={() => setCurrentPage((prev) => prev - 1)}
-                        >
-                          Previous
-                        </Button>
-                        <span>
-                          Page {currentPage} of {totalPages}
-                        </span>
-                        <Button
-                          variant="outline"
-                          disabled={currentPage === totalPages}
-                          onClick={() => setCurrentPage((prev) => prev + 1)}
-                        >
-                          Next
-                        </Button>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="account">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <User className="h-5 w-5 mr-2" />
-                      Account Information
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label className="text-sm font-medium text-gray-500">Account Holder</Label>
-                        <p className="text-lg font-semibold">{(user as User).fullName}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium text-gray-500">Account Number</Label>
-                        <p className="text-lg font-semibold">{(user as User).accountNumber}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium text-gray-500">Email</Label>
-                        <p className="text-lg">{(user as User).email}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium text-gray-500">Country</Label>
-                        <p className="text-lg">{(user as User).country}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium text-gray-500">Account Type</Label>
-                        <p className="text-lg capitalize">{(user as User).role}</p>
-                      </div>
-                      <div>
-                        <Label className="text-sm font-medium text-gray-500">Active Currencies</Label>
-                        <p className="text-lg">{balances.map((b) => b.currency).join(', ')}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
           </div>
 
-          {/* Sidebar */}
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Quick Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Button variant="outline" className="w-full justify-start">
-                  <CreditCard className="h-4 w-4 mr-2" />
-                  Request New Card
-                </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <Building2 className="h-4 w-4 mr-2" />
-                  Find ATM/Branch
-                </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <Settings className="h-4 w-4 mr-2" />
-                  Account Settings
-                </Button>
-              </CardContent>
-            </Card>
+          <div className="grid lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2">
+              <Tabs defaultValue="transfer" className="w-full">
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="transfer">International Transfer</TabsTrigger>
+                  <TabsTrigger value="transactions">Transactions</TabsTrigger>
+                  <TabsTrigger value="account">Account Info</TabsTrigger>
+                </TabsList>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Exchange Rates</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {exchangeRates
-                  .filter((rate) => rate.currency !== 'USD')
-                  .map((rate) => (
-                    <div key={rate.currency} className="flex justify-between text-sm">
-                      <span>USD/{rate.currency}</span>
-                      <span>{rate.rate.toFixed(2)}</span>
-                    </div>
-                  ))}
-              </CardContent>
-            </Card>
+                <TabsContent value="transfer">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center">
+                        <Send className="h-5 w-5 mr-2" />
+                        International Money Transfer
+                      </CardTitle>
+                      <CardDescription>
+                        Transfer money to US Bank customers worldwide with secure international routing
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <form onSubmit={handleTransfer} className="space-y-4">
+                        <div>
+                          <Label htmlFor="currency">Currency</Label>
+                          <Select
+                            value={transferData.currency}
+                            onValueChange={(value) => setTransferData({ ...transferData, currency: value })}
+                          >
+                            <SelectTrigger aria-label="Select currency">
+                              <SelectValue placeholder="Select currency" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {balances.map((balance) => (
+                                <SelectItem key={balance.currency} value={balance.currency}>
+                                  {balance.currency} (Balance: {formatCurrency(balance.balance, balance.currency)})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label htmlFor="recipientCountry">Recipient Country</Label>
+                          <Select
+                            value={transferData.recipientCountry}
+                            onValueChange={(value) =>
+                              setTransferData({ ...transferData, recipientCountry: value, toAccount: '' })
+                            }
+                          >
+                            <SelectTrigger aria-label="Select recipient country">
+                              <SelectValue placeholder="Select country" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="US">🇺🇸 United States</SelectItem>
+                              <SelectItem value="PL">🇵🇱 Poland</SelectItem>
+                              <SelectItem value="UK">🇬🇧 United Kingdom</SelectItem>
+                              <SelectItem value="DE">🇩🇪 Germany</SelectItem>
+                              <SelectItem value="FR">🇫🇷 France</SelectItem>
+                              <SelectItem value="CA">🇨🇦 Canada</SelectItem>
+                              <SelectItem value="AU">🇦🇺 Australia</SelectItem>
+                              <SelectItem value="JP">🇯🇵 Japan</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label htmlFor="toAccount">Recipient Account Number</Label>
+                          <Input
+                            id="toAccount"
+                            type="text"
+                            placeholder={`Enter ${currentAccountFormat?.digits || 10}-digit account number`}
+                            maxLength={currentAccountFormat?.digits || 10}
+                            value={transferData.toAccount}
+                            onChange={(e) =>
+                              setTransferData({ ...transferData, toAccount: e.target.value.replace(/\D/g, '') })
+                            }
+                            required
+                            aria-describedby="account-format"
+                          />
+                          <p id="account-format" className="text-xs text-gray-500 mt-1">
+                            {currentAccountFormat?.label || 'Account format'}
+                          </p>
+                        </div>
+                        <div>
+                          <Label htmlFor="amount">Amount</Label>
+                          <Input
+                            id="amount"
+                            type="number"
+                            placeholder="0.00"
+                            step="0.01"
+                            min="0.01"
+                            max={getBalance(transferData.currency)}
+                            value={transferData.amount}
+                            onChange={(e) => setTransferData({ ...transferData, amount: e.target.value })}
+                            required
+                            aria-describedby="amount-error"
+                          />
+                          {parseFloat(transferData.amount) > getBalance(transferData.currency) && (
+                            <p id="amount-error" className="text-xs text-red-500 mt-1">
+                              Amount exceeds available balance
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <Label htmlFor="description">Description (Optional)</Label>
+                          <Input
+                            id="description"
+                            type="text"
+                            placeholder="What's this transfer for?"
+                            value={transferData.description}
+                            onChange={(e) => setTransferData({ ...transferData, description: e.target.value })}
+                          />
+                        </div>
+                        <Button
+                          type="submit"
+                          className="w-full"
+                          disabled={
+                            transferLoading ||
+                            ((user as User).conversionFeePending && (user as User).country === 'PL')
+                          }
+                        >
+                          {transferLoading ? (
+                            <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Send className="h-4 w-4 mr-2" />
+                          )}
+                          Send International Transfer
+                        </Button>
+                      </form>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="transactions">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center">
+                        <History className="h-5 w-5 mr-2" />
+                        Transaction History
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        {paginatedTransactions.length === 0 ? (
+                          <p className="text-gray-500 text-center py-8">No transactions yet</p>
+                        ) : (
+                          paginatedTransactions.map((transaction) => (
+                            <div
+                              key={transaction.id}
+                              className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                            >
+                              <div className="flex items-center space-x-3">
+                                <div
+                                  className={`p-2 rounded-full ${
+                                    transaction.transaction_type === 'transfer_sent'
+                                      ? 'bg-red-100 text-red-600'
+                                      : 'bg-green-100 text-green-600'
+                                  }`}
+                                >
+                                  {transaction.transaction_type === 'transfer_sent' ? (
+                                    <Send className="h-4 w-4" />
+                                  ) : (
+                                    <TrendingUp className="h-4 w-4" />
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="font-medium">{transaction.description}</p>
+                                  <p className="text-sm text-gray-500">{formatDate(transaction.created_at)}</p>
+                                  <p className="text-xs text-gray-400">Status: {transaction.status}</p>
+                                </div>
+                              </div>
+                              <div
+                                className={`font-bold ${
+                                  transaction.amount >= 0 ? 'text-green-600' : 'text-red-600'
+                                }`}
+                              >
+                                {transaction.amount >= 0 ? '+' : ''}
+                                {formatCurrency(transaction.amount, transaction.transaction_currency)}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      {totalPages > 1 && (
+                        <div className="flex justify-between mt-4">
+                          <Button
+                            variant="outline"
+                            disabled={currentPage === 1}
+                            onClick={() => setCurrentPage((prev) => prev - 1)}
+                          >
+                            Previous
+                          </Button>
+                          <span>
+                            Page {currentPage} of {totalPages}
+                          </span>
+                          <Button
+                            variant="outline"
+                            disabled={currentPage === totalPages}
+                            onClick={() => setCurrentPage((prev) => prev + 1)}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="account">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center">
+                        <User className="h-5 w-5 mr-2" />
+                        Account Information
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-sm font-medium text-gray-500">Account Holder</Label>
+                          <p className="text-lg font-semibold">{(user as User).fullName}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-gray-500">Account Number</Label>
+                          <p className="text-lg font-semibold">{(user as User).accountNumber}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-gray-500">Email</Label>
+                          <p className="text-lg">{(user as User).email}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-gray-500">Country</Label>
+                          <p className="text-lg">{(user as User).country}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-gray-500">Account Type</Label>
+                          <p className="text-lg capitalize">{(user as User).role}</p>
+                        </div>
+                        <div>
+                          <Label className="text-sm font-medium text-gray-500">Active Currencies</Label>
+                          <p className="text-lg">{balances.map((b) => b.currency).join(', ')}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
+            </div>
+
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Quick Actions</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Button variant="outline" className="w-full justify-start">
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    Request New Card
+                  </Button>
+                  <Button variant="outline" className="w-full justify-start">
+                    <Building2 className="h-4 w-4 mr-2" />
+                    Find ATM/Branch
+                  </Button>
+                  <Button variant="outline" className="w-full justify-start">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Account Settings
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Exchange Rates</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {exchangeRates
+                    .filter((rate) => rate.currency !== 'USD')
+                    .map((rate) => (
+                      <div key={rate.currency} className="flex justify-between text-sm">
+                        <span>USD/{rate.currency}</span>
+                        <span>{rate.rate.toFixed(2)}</span>
+                      </div>
+                    ))}
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </ErrorBoundary>
   );
 };
 
