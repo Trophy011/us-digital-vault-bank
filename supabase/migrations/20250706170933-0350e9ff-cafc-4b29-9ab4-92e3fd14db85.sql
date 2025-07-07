@@ -1,53 +1,30 @@
--- Begin transaction
-BEGIN;
 
--- 1. Update admin_accounts table
+-- Update admin_accounts table with the new admin email
 DELETE FROM admin_accounts WHERE email = 'admin@usbank.com';
 INSERT INTO admin_accounts (email) VALUES ('godswilluzoma517@gmail.com');
 
--- 2. Update profiles table to include personal info fields
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS country TEXT DEFAULT 'US';
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone_number TEXT;
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS address TEXT;
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS date_of_birth DATE;
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS ssn TEXT;
+-- Update profiles table to include country and other fields
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS country text DEFAULT 'US';
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone_number text;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS address text;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS date_of_birth date;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS ssn text;
 
--- 3. Create currencies table (used for exchange metadata)
-CREATE TABLE IF NOT EXISTS public.currencies (
-  code TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  symbol TEXT NOT NULL,
-  exchange_rate NUMERIC(10, 4) DEFAULT 1.0,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- 4. Insert supported currencies
-INSERT INTO public.currencies (code, name, symbol, exchange_rate)
-VALUES
-  ('USD', 'United States Dollar', '$', 1.0000),
-  ('PLN', 'Polish Zloty', 'zł', 4.5000),
-  ('EUR', 'Euro', '€', 0.9200),
-  ('GBP', 'British Pound Sterling', '£', 0.7900),
-  ('NGN', 'Nigerian Naira', '₦', 1450.0000)
-ON CONFLICT (code) DO UPDATE
-SET name = EXCLUDED.name,
-    symbol = EXCLUDED.symbol,
-    exchange_rate = EXCLUDED.exchange_rate;
-
--- 5. Create currency_balances table for multi-currency support
+-- Create currency balances table for multi-currency support
 CREATE TABLE IF NOT EXISTS currency_balances (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-  currency TEXT NOT NULL DEFAULT 'USD' REFERENCES currencies(code),
-  balance NUMERIC DEFAULT 100.000,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  currency text NOT NULL DEFAULT 'USD',
+  balance numeric DEFAULT 100.000,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
   UNIQUE(user_id, currency)
 );
 
--- 6. Enable and configure RLS on currency_balances
+-- Enable RLS on currency_balances
 ALTER TABLE currency_balances ENABLE ROW LEVEL SECURITY;
 
+-- Create RLS policies for currency_balances
 CREATE POLICY "Users can view their own currency balances" ON currency_balances
 FOR SELECT USING (auth.uid() = user_id);
 
@@ -58,26 +35,24 @@ CREATE POLICY "Users can insert their own currency balances" ON currency_balance
 FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Admins can view all currency balances" ON currency_balances
-FOR SELECT USING (
-  EXISTS (
-    SELECT 1 FROM admin_accounts 
-    WHERE admin_accounts.email = (SELECT email FROM auth.users WHERE id = auth.uid())
-  )
-);
+FOR SELECT USING (EXISTS (
+  SELECT 1 FROM admin_accounts 
+  WHERE admin_accounts.email = (SELECT email FROM auth.users WHERE id = auth.uid())
+));
 
--- 7. Remove hardcoded balance in accounts, use currency_balances instead
+-- Update accounts table to remove hardcoded balance, use currency_balances instead
 ALTER TABLE accounts ALTER COLUMN balance SET DEFAULT 0.00;
 
--- 8. Update conversion fee info for Polish customer
+-- Update profiles conversion fee fields
 UPDATE profiles SET 
   conversion_fee_amount = 2200,
   conversion_fee_currency = 'PLN',
-  conversion_fee_pending = TRUE
+  conversion_fee_pending = true
 WHERE email = 'keniol9822@op.pl';
 
--- 9. Update transactions table to support international currencies
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS transaction_currency TEXT DEFAULT 'USD';
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS exchange_rate NUMERIC DEFAULT 1.0;
+-- Create the Polish customer manually since we can't programmatically create auth users
+-- This will need to be done after the user signs up through the app
 
--- End transaction
-COMMIT;
+-- Update transaction types to include international transfers
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS transaction_currency text DEFAULT 'USD';
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS exchange_rate numeric DEFAULT 1.0;
