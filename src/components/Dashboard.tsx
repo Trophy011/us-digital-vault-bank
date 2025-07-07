@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -11,19 +10,20 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { 
   Building2, 
   DollarSign, 
   Send, 
   History, 
-  PiggyBank, 
   LogOut, 
   User,
   Settings,
   CreditCard,
   TrendingUp,
   AlertCircle,
-  Globe
+  Globe,
+  RefreshCw
 } from 'lucide-react';
 
 interface CurrencyBalance {
@@ -70,13 +70,24 @@ const Dashboard = () => {
   const [balances, setBalances] = useState<CurrencyBalance[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (user) {
-      loadBalances();
-      loadTransactions();
+      loadInitialData();
     }
   }, [user]);
+
+  const loadInitialData = async () => {
+    try {
+      setError(null);
+      await Promise.all([loadBalances(), loadTransactions()]);
+    } catch (error) {
+      console.error('Error loading initial data:', error);
+      setError('Failed to load account data. Please try refreshing the page.');
+    }
+  };
 
   const loadBalances = async () => {
     if (!user?.id) return;
@@ -91,11 +102,7 @@ const Dashboard = () => {
       setBalances(data || []);
     } catch (error) {
       console.error('Error loading balances:', error);
-      toast({
-        title: "Error loading balances",
-        description: "Please refresh the page to try again.",
-        variant: "destructive",
-      });
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -124,11 +131,26 @@ const Dashboard = () => {
       setTransactions(mappedTransactions);
     } catch (error) {
       console.error('Error loading transactions:', error);
+      throw error;
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await loadInitialData();
       toast({
-        title: "Error loading transactions",
-        description: "Please refresh the page to try again.",
+        title: "Data refreshed",
+        description: "Your account information has been updated.",
+      });
+    } catch (error) {
+      toast({
+        title: "Refresh failed",
+        description: "Unable to refresh data. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -359,9 +381,30 @@ const Dashboard = () => {
   };
 
   if (loading) {
+    return <LoadingSpinner message="Loading your account..." />;
+  }
+
+  if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
-        <div className="text-xl">Loading your account...</div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-4">
+        <div className="max-w-md w-full">
+          <Alert className="border-red-200 bg-red-50">
+            <AlertCircle className="h-4 w-4 text-red-600" />
+            <AlertDescription className="text-red-800">
+              {error}
+              <div className="mt-4 space-y-2">
+                <Button onClick={handleRefresh} size="sm" className="w-full">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Try Again
+                </Button>
+                <Button onClick={handleLogout} variant="outline" size="sm" className="w-full">
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign Out
+                </Button>
+              </div>
+            </AlertDescription>
+          </Alert>
+        </div>
       </div>
     );
   }
@@ -398,6 +441,15 @@ const Dashboard = () => {
             </span>
           </div>
           <div className="flex items-center space-x-4">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={handleRefresh}
+              disabled={refreshing}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
             <span className="text-sm text-gray-600">Welcome, {user.fullName}</span>
             {user.role === 'admin' && (
               <Button 
